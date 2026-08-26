@@ -33,28 +33,51 @@ The app is containerized (`Dockerfile`) for handoff to devops:
    GoTrue auth, Kong, Studio, etc.) that Supabase maintains itself. Once it's
    up, set `NEXT_PUBLIC_SUPABASE_URL` to its Kong gateway URL and the
    anon/service-role keys to the JWTs configured in *that* stack's `.env`.
-2. **App + MinIO/Meilisearch/Ollama**: `docker compose up -d --build` from
+2. **MinIO/Meilisearch credentials — you mint these, they're not issued by
+   anything external**: pick strong values yourself (e.g.
+   `openssl rand -base64 32`) for `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`
+   and `MEILI_MASTER_KEY`, and put them in `infra/.env` (a separate file
+   from the app's root `.env` — copy `infra/.env` from what's used for local
+   dev, or create it fresh). Those same values then also go into the app's
+   root `.env` as `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` and
+   `MEILISEARCH_API_KEY` — there's no separate IAM/service-account layer
+   here, so the container's root credentials double as the app's client
+   credentials. See the comments in `.env.example` for exactly which vars
+   need public, TLS-terminated hostnames (MinIO — presigned URLs go to the
+   end user's browser) versus which can stay on the internal Docker network
+   (Meilisearch, Ollama — server-side only, never called from the browser).
+3. **App + MinIO/Meilisearch/Ollama**: `docker compose up -d --build` from
    `/infra` builds the app image from the repo-root `Dockerfile` and starts
    it alongside the existing self-hosted MinIO/Meilisearch/Ollama services.
    The app reads its config from `.env` at the repo root — copy
    `.env.example`, fill in real values (including both `DATABASE_URL`, the
    pooled connection, and `DIRECT_URL`, the direct one — see the comments in
    `.env.example` and `prisma/schema.prisma`).
-3. **Migrations run automatically**: the container's entrypoint runs
+4. **Two one-time setup steps Docker doesn't do for you**:
+   - Create the MinIO bucket (`MINIO_BUCKET`, `fireflink-docs` by default)
+     via the MinIO console (port 9001) or `mc mb` — nothing creates it
+     automatically, and uploads will fail until it exists.
+   - Run `npm run search:setup` once (inside the running `app` container,
+     e.g. `docker compose exec app npm run search:setup`) to configure
+     Meilisearch's searchable/filterable attributes — without it, the
+     dashboard's category/type/staleness filters silently return nothing.
+5. **Migrations run automatically**: the container's entrypoint runs
    `prisma migrate deploy` (against `DIRECT_URL`) before starting the
    server, so a fresh deploy of a new image version applies any pending
    migrations on its own — no separate manual step. Still paste
    `prisma/rls_policies.sql` into the Supabase SQL editor once, after the
    first migration.
-4. **Reverse proxy + TLS**: put the host behind Caddy/nginx/similar and
-   terminate TLS there — the container itself just listens on port 3000.
-5. **Health check**: `GET /api/health` (used by the image's own
+6. **Reverse proxy + TLS**: put the host behind Caddy/nginx/similar and
+   terminate TLS there for the app and MinIO (Meilisearch and Ollama don't
+   need this — see step 2). The app container itself just listens on plain
+   HTTP port 3000.
+7. **Health check**: `GET /api/health` (used by the image's own
    `HEALTHCHECK` and suitable for a load balancer / orchestrator probe).
-6. **Scheduled jobs run automatically**: the `cron` service in
+8. **Scheduled jobs run automatically**: the `cron` service in
    `infra/docker-compose.yml` (same image as `app`) runs
    `retention:run`/`staleness:run`/`digest:send` on the schedule in
    `docker/crontab` — no host cron setup needed.
-7. **Ollama model pulled automatically**: the one-shot `ollama-pull` service
+9. **Ollama model pulled automatically**: the one-shot `ollama-pull` service
    pulls `OLLAMA_MODEL` once `ollama` is up — no manual `docker exec` step.
 
 ## 1. Provision the free services (local dev / non-Docker deploy)
