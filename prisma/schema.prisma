@@ -3,12 +3,20 @@
 // Run: npx prisma migrate dev --name init
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled connection (e.g. self-hosted Supabase's Supavisor/pgbouncer port
+  // 6543) for the running app — safe for many short-lived serverless-style
+  // connections.
+  url       = env("DATABASE_URL")
+  // Direct, unpooled connection (port 5432) used only for `prisma migrate
+  // deploy`. Migrations need advisory locks and prepared statements that a
+  // transaction-mode pooler doesn't support, so this must bypass it.
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {

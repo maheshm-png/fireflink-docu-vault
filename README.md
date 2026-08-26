@@ -23,7 +23,35 @@ demo videos, and other sales/demo collateral — free/open-source stack througho
 - Staleness-check script: rule-based (review-cycle age) + AI-assisted, using a **self-hosted open-source Ollama LLM** (Llama 3.1) — no paid API
 - Theme colors pulled from FireFlink's actual site metadata (`#29102D`)
 
-## 1. Provision the free services
+## Production deployment (Docker + self-hosted Supabase)
+
+The app is containerized (`Dockerfile`) for handoff to devops:
+
+1. **Self-hosted Supabase**: deploy Supabase's own official docker-compose
+   stack (https://github.com/supabase/supabase/tree/master/docker) — this
+   project doesn't bundle it, since it's a multi-container stack (Postgres,
+   GoTrue auth, Kong, Studio, etc.) that Supabase maintains itself. Once it's
+   up, set `NEXT_PUBLIC_SUPABASE_URL` to its Kong gateway URL and the
+   anon/service-role keys to the JWTs configured in *that* stack's `.env`.
+2. **App + MinIO/Meilisearch/Ollama**: `docker compose up -d --build` from
+   `/infra` builds the app image from the repo-root `Dockerfile` and starts
+   it alongside the existing self-hosted MinIO/Meilisearch/Ollama services.
+   The app reads its config from `.env` at the repo root — copy
+   `.env.example`, fill in real values (including both `DATABASE_URL`, the
+   pooled connection, and `DIRECT_URL`, the direct one — see the comments in
+   `.env.example` and `prisma/schema.prisma`).
+3. **Migrations run automatically**: the container's entrypoint runs
+   `prisma migrate deploy` (against `DIRECT_URL`) before starting the
+   server, so a fresh deploy of a new image version applies any pending
+   migrations on its own — no separate manual step. Still paste
+   `prisma/rls_policies.sql` into the Supabase SQL editor once, after the
+   first migration.
+4. **Reverse proxy + TLS**: put the host behind Caddy/nginx/similar and
+   terminate TLS there — the container itself just listens on port 3000.
+5. **Health check**: `GET /api/health` (used by the image's own
+   `HEALTHCHECK` and suitable for a load balancer / orchestrator probe).
+
+## 1. Provision the free services (local dev / non-Docker deploy)
 
 1. **Supabase** (auth + Postgres): create a free project at supabase.com.
    Copy the project URL, anon key, and service role key into `.env`.

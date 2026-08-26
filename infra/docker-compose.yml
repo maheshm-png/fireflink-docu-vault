@@ -1,11 +1,33 @@
-# Deploy on the Oracle Cloud Always-Free VM.
-# Run: docker compose up -d
-# Put this VM's public IP/domain behind a reverse proxy with TLS (e.g. Caddy)
-# before pointing MINIO_ENDPOINT / MEILISEARCH_HOST at it in production.
+# Production deployment.
+# Run: docker compose up -d --build   (from this directory)
+# Put this host's public IP/domain behind a reverse proxy with TLS (e.g.
+# Caddy/nginx) before pointing NEXT_PUBLIC_APP_URL / MINIO_ENDPOINT /
+# MEILISEARCH_HOST at it.
+#
+# This brings up the app plus its self-hosted MinIO/Meilisearch/Ollama
+# dependencies. Self-hosted Supabase (auth + Postgres) is deployed
+# separately from Supabase's own official docker-compose stack
+# (https://github.com/supabase/supabase/tree/master/docker) — point the
+# app's SUPABASE_*/DATABASE_URL/DIRECT_URL vars at wherever that stack
+# ends up running (same Docker network, another host, etc.).
 
 version: "3.9"
 
 services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - minio
+      - meilisearch
+      - ollama
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
