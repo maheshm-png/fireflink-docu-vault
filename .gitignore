@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+.eslintcache
+Thumbs.db
+.DS_Store

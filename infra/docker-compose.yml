@@ -1,0 +1,45 @@
+# Deploy on the Oracle Cloud Always-Free VM.
+# Run: docker compose up -d
+# Put this VM's public IP/domain behind a reverse proxy with TLS (e.g. Caddy)
+# before pointing MINIO_ENDPOINT / MEILISEARCH_HOST at it in production.
+
+version: "3.9"
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      - "7700:7700"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    # After first start: docker exec -it <container> ollama pull llama3.1:8b
+
+volumes:
+  minio_data:
+  meili_data:
+  ollama_data:

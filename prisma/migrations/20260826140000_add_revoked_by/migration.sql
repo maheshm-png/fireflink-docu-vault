@@ -1,0 +1,5 @@
+ALTER TABLE "Document" ADD COLUMN "revokedAt" TIMESTAMP(3);
+ALTER TABLE "Document" ADD COLUMN "revokedById" TEXT;
+
+ALTER TABLE "Document" ADD CONSTRAINT "Document_revokedById_fkey"
+  FOREIGN KEY ("revokedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

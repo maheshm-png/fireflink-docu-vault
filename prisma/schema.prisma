@@ -1,0 +1,350 @@
+// Fireflink Document Hub — database schema
+// Target: PostgreSQL (Supabase free tier)
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  superadmin
+  manager
+  contributor // was "sc" (Solution Consultant) — renamed to Contributor
+  user        // view-only (also covers former Business Development role, merged in) — was "other"
+}
+
+enum DocType {
+  ppt
+  video
+  pdf
+  doc
+  excel
+  link  // externally hosted (Google Docs/Sheets/Slides, etc.) — see Document.externalUrl
+  other
+}
+
+enum DocStatus {
+  pending_review
+  published
+  archived
+  rejected
+  revoked // was published, manager pulled it down; needs re-approval to go live again
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  role         Role     @default(user)
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  // A contributor's default reviewing manager, superadmin-managed
+  // (app/admin/users) — pre-selected as the suggested reviewer on the
+  // upload form (app/dashboard/upload/UploadForm.tsx). Not used for
+  // managers: they already have a free choice of any other manager at
+  // review time (reassign / request a second opinion — see
+  // app/api/documents/[id]/review/route.ts), so there's no fixed hierarchy
+  // among them to record here.
+  reportsToId  String?
+  reportsTo    User?    @relation("ReportsTo", fields: [reportsToId], references: [id])
+  directReports User[]  @relation("ReportsTo")
+
+  // Job title, e.g. "Presales Consultant" — picked from the admin-managed
+  // list below (app/admin/designations), not free text, so it stays a
+  // clean, consistent set rather than every user typing their own variant.
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id])
+
+  uploadedDocuments   Document[]        @relation("UploadedBy")
+  ownedDocuments      Document[]        @relation("OwnedBy")
+  deletedDocuments    Document[]        @relation("DeletedBy")
+  revokedDocuments    Document[]        @relation("RevokedBy")
+  uploadedVersions    DocumentVersion[]
+  reviewsRequested    ReviewRequest[]   @relation("RequestedBy")
+  reviewsAssigned     ReviewRequest[]   @relation("ReviewerFor")
+  auditEntries        AuditLog[]
+  events              DocumentEvent[]
+  notifications       Notification[]
+  categoriesCreated   Category[]
+  announcementsPosted Announcement[]
+}
+
+// Admin-managed job-title options for User.designation (app/admin/
+// designations) — superadmin adds/removes entries here; each User picks one
+// from this list rather than free-typing their own title.
+model Designation {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  users     User[]
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  // Review cycle in days before a doc in this category is flagged stale —
+  // null means "no cycle": documents uploaded into this category are
+  // marked permanent (Document.neverExpires) by default at upload time
+  // (see app/api/documents/route.ts) and never get staleness-flagged.
+  reviewCycleDays Int?  @default(90)
+  // Manager-defined upload form for this category — an array of
+  // CategoryFormField (see lib/formSchema.ts). When someone uploads into
+  // this category, the app renders these fields and requires them before
+  // the upload can go through, so every doc carries the context (client,
+  // date, competitor, region, whatever the manager configured) without
+  // anyone having to chase the uploader for it later.
+  formSchema  Json     @default("[]")
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdById String
+  createdAt   DateTime @default(now())
+
+  documents   Document[]
+}
+
+model Document {
+  id               String     @id @default(uuid())
+  title            String
+  category         Category   @relation(fields: [categoryId], references: [id])
+  categoryId       String
+  docType          DocType
+  status           DocStatus  @default(pending_review)
+  tags             String[]   @default([])
+  // Set instead of ever having a file/version — a document that just links
+  // out to an externally-hosted file (Google Docs/Sheets/Slides, a public
+  // CSV, etc.) rather than something uploaded into our own storage. Mutually
+  // exclusive with having versions: docType "link" implies this is set and
+  // currentVersionId stays null forever; every other docType implies this
+  // is null. Still goes through the same review/publish workflow as a file
+  // upload — only the storage/versioning mechanics are skipped.
+  externalUrl      String?
+  // Answers to the uploading category's formSchema, keyed by field id —
+  // e.g. {"client_name": "Acme Corp", "competitor": "Salesforce"}. This is
+  // what lets someone opening the doc later get context (who it's for,
+  // what it compares, when it applies) without tracking down the uploader.
+  metadata         Json       @default("{}")
+
+  owner            User       @relation("OwnedBy", fields: [ownerId], references: [id])
+  ownerId          String
+  uploadedBy       User       @relation("UploadedBy", fields: [uploadedById], references: [id])
+  uploadedById     String
+
+  // Set when an uploader force-uploads past the duplicate-title/duplicate-
+  // content warning on POST /api/documents rather than adding a new version
+  // to the existing document — flags this as a probable duplicate rather
+  // than silently allowing content to fork.
+  duplicateOfId    String?
+  duplicateOf      Document?  @relation("DocumentDuplicates", fields: [duplicateOfId], references: [id])
+  duplicateFlaggedDocs Document[] @relation("DocumentDuplicates")
+  duplicateReason  String?
+
+  currentVersionId String?    @unique
+  currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
+
+  versions         DocumentVersion[] @relation("VersionsOfDoc")
+  reviewRequests   ReviewRequest[]
+  stalenessFlags   StalenessFlag[]
+  events           DocumentEvent[]
+
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  lastReviewedAt   DateTime?
+
+  // Manager-set override for when this document's review is next due —
+  // set via "Extend Validity" (app/dashboard/documents/[id]/LifecycleActions.tsx),
+  // where the manager picks how many days to push it out by. Takes
+  // precedence over the computed lastReviewedAt + category.reviewCycleDays
+  // whenever it's set, so an extension always means exactly what the
+  // manager asked for, not just "reset the clock to today."
+  reviewDueAt      DateTime?
+
+  // A manager-set "permanent" flag — excludes this document from staleness
+  // flagging (scripts/run-staleness-check.ts) and from the old-superseded-
+  // version purge (scripts/run-retention-cleanup.ts), even past a year old.
+  // For documents that are simply always current by nature (legal terms,
+  // brand guidelines) and shouldn't cycle through re-review at all.
+  neverExpires     Boolean    @default(false)
+
+  // Why a manager pulled this back down — required at revoke time (see
+  // app/api/documents/[id]/revoke/route.ts and RevokeButton.tsx), shown
+  // alongside the document wherever revoked docs are visible
+  // (app/dashboard/revoked/page.tsx, org-wide view-only browsing). Not
+  // cleared on republish — stays as history of the last revocation.
+  revokeReason     String?
+  revokedAt        DateTime?
+  revokedBy        User?      @relation("RevokedBy", fields: [revokedById], references: [id])
+  revokedById      String?
+
+  // Soft-delete: DELETE /api/documents/:id sets these instead of removing
+  // the row outright, so a manager/superadmin can restore within a 30-day
+  // window (see app/admin/deleted/page.tsx and the restore route). Only
+  // after that window does scripts/run-retention-cleanup.ts hard-delete it
+  // (storage files + row) for good.
+  deletedAt        DateTime?
+  deletedBy        User?      @relation("DeletedBy", fields: [deletedById], references: [id])
+  deletedById      String?
+
+  @@index([status])
+  @@index([categoryId])
+  @@index([deletedAt])
+}
+
+model DocumentVersion {
+  id             String   @id @default(uuid())
+  document       Document @relation("VersionsOfDoc", fields: [documentId], references: [id])
+  documentId     String
+  versionNumber  Int
+  filePath       String   // storage key (MinIO / Supabase Storage)
+  originalFilename String @default("file")  // preserved for correct download filename/extension
+  fileSize       BigInt
+  checksum       String   // sha256, for integrity verification
+  changelog      String?
+  extractedText  String?  // parsed text for search indexing
+  // Storage key of a LibreOffice-converted PDF of this version (PPT/Excel
+  // only) — generated at upload time so the preview modal can render it
+  // through the existing accurate PDF viewer instead of an approximation.
+  // Null if conversion wasn't applicable (already a PDF/video/etc.) or
+  // failed (LibreOffice unavailable, unsupported content) — the preview
+  // falls back gracefully when this is unset.
+  previewPdfPath String?
+
+  uploadedBy     User     @relation(fields: [uploadedById], references: [id])
+  uploadedById   String
+  uploadedAt     DateTime @default(now())
+
+  isCurrentFor   Document? @relation("CurrentVersion")
+
+  @@unique([documentId, versionNumber])
+}
+
+model ReviewRequest {
+  id          String       @id @default(uuid())
+  document    Document     @relation(fields: [documentId], references: [id])
+  documentId  String
+  requestedBy User         @relation("RequestedBy", fields: [requestedById], references: [id])
+  requestedById String
+  reviewer    User         @relation("ReviewerFor", fields: [reviewerId], references: [id])
+  reviewerId  String
+  status      ReviewStatus @default(pending)
+  comments    String?
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+
+  // Groups reviewers assigned together into one escalation "round", purely
+  // for the review-history trail (app/dashboard/documents/[id]/ReviewActions.tsx)
+  // — publish/reject decisions themselves just look at every row regardless
+  // of round (see app/api/documents/[id]/review/route.ts). Round 1 is the
+  // reviewer assigned at upload time (or reassigned within that same round);
+  // requesting a second/third opinion bumps to a new round with the newly
+  // added reviewer(s), while earlier rounds' rows are untouched history.
+  roundNumber Int          @default(1)
+
+  @@index([documentId, status])
+}
+
+model StalenessFlag {
+  id         String   @id @default(uuid())
+  document   Document @relation(fields: [documentId], references: [id])
+  documentId String
+  reason     String
+  severity   String   @default("info") // info | warning | critical
+  raisedAt   DateTime @default(now())
+  resolved   Boolean  @default(false)
+}
+
+model DocumentEvent {
+  id         String   @id @default(uuid())
+  document   Document @relation(fields: [documentId], references: [id])
+  documentId String
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  type       String   // "view" | "download"
+  timestamp  DateTime @default(now())
+
+  @@index([documentId])
+  @@index([type])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  action     String   // upload | approve | reject | delete | download | login | role_change
+  documentId String?
+  // Snapshotted at the moment of the action, not looked up live — documentId
+  // has no real FK (a document can later be deleted), and the whole point of
+  // an audit trail is that "who deleted document X" still reads correctly
+  // after X is gone.
+  documentTitle String?
+  ipAddress  String?
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+}
+
+// Singleton row (id is always "singleton") holding org-wide, admin/manager-
+// editable settings — see app/admin/settings/page.tsx. Kept as one row
+// rather than scattered env vars so these are changeable at runtime without
+// a redeploy.
+model AppSettings {
+  id                      String @id @default("singleton")
+  // Days a soft-deleted document stays recoverable before
+  // scripts/run-retention-cleanup.ts purges it for good.
+  deletedDocRetentionDays Int    @default(30)
+  // Days an old, superseded (non-current) file version is kept before that
+  // same script purges it. Documents flagged neverExpires are exempt.
+  oldVersionRetentionDays Int    @default(365)
+}
+
+// Manager-authored messages shown in the scrolling ticker on the dashboard
+// home screen (components/AnnouncementTicker.tsx), alongside auto-generated
+// "new document published" entries the ticker derives from Document directly
+// (no separate row needed for those — this table is only for the messages a
+// manager actually typed). isActive lets a manager pull a message without
+// losing its history, same soft-toggle spirit as Document status changes.
+model Announcement {
+  id          String   @id @default(uuid())
+  message     String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdById String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([isActive])
+}
+
+// In-app notifications shown in the bell/slide-out panel (components/
+// NotificationBell.tsx) — a separate, per-user-row concern from the
+// email/Google Chat sends in lib/notify.ts, though the same three events
+// drive both: a document published, revoked, or a new version landing for
+// a specific reviewer to act on.
+model Notification {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  type          String   // "published" | "revoked" | "new_version"
+  title         String
+  body          String?
+  documentId    String?
+  documentTitle String?
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
