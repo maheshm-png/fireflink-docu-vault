@@ -66,11 +66,7 @@ The app is containerized (`Dockerfile`) for handoff to devops:
 
 ## 2. Logo
 
-I couldn't fetch the actual FireFlink logo file into this build environment (no internet access in the sandbox that generated this code). Download it yourself from fireflink.com and save it as:
-```
-/public/logo.svg
-```
-The Navbar and login page already reference this path — it'll appear automatically once the file exists.
+The real FireFlink logo is already in place — `public/logo-full.png` (wordmark) and `public/logo-icon.png` (mark only), used throughout via `components/Logo.tsx` (Navbar, login, reset-password, `BrandedLoader`) and as the watermark stamped onto downloaded PPT/Word/Excel files (`lib/watermark.ts`). The browser tab favicon (`app/icon.png`, picked up automatically by Next.js's App Router icon convention) is the same icon mark. To update the branding, replace those files directly — no code changes needed.
 
 ## 3. Database setup
 
