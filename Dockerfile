@@ -45,12 +45,16 @@ ENV PORT=3000
 #   conversion for document previews (lib/officeConvert.ts, lib/storage.ts).
 #   Optional at the app level (falls back gracefully if missing) but needed
 #   here for that feature to actually work in production.
+# - cron: only used by the separate `cron` compose service (same image,
+#   different entrypoint/command) that runs the scheduled maintenance
+#   scripts below — unused, harmless weight in the `app` service itself.
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
       libreoffice \
       openssl \
       fontconfig \
       fonts-dejavu \
       ca-certificates \
+      cron \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/node_modules ./node_modules
@@ -59,11 +63,23 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.js ./next.config.js
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+# Not part of the Next.js build output — these run directly via `tsx` (see
+# package.json's staleness:run/retention:run/digest:send/etc. scripts),
+# invoked by the `cron` service.
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/lib ./lib
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+COPY docker/crontab /etc/cron.d/fireflink-jobs
+COPY docker/cron-entrypoint.sh ./docker/cron-entrypoint.sh
+COPY docker/run-cron-job.sh ./docker/run-cron-job.sh
+RUN chmod +x ./docker-entrypoint.sh ./docker/cron-entrypoint.sh ./docker/run-cron-job.sh \
+    && chmod 0644 /etc/cron.d/fireflink-jobs
 
-# Run as the non-root `node` user baked into the base image. LibreOffice
-# needs a writable HOME for its profile directory.
+# Run as the non-root `node` user baked into the base image for the `app`
+# service. LibreOffice needs a writable HOME for its profile directory.
+# The `cron` service overrides this back to root (crond requires it) via
+# `user: root` in docker-compose.yml.
 RUN mkdir -p /home/node/.config && chown -R node:node /home/node /app
 USER node
 

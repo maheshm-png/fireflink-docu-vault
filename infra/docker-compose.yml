@@ -28,6 +28,24 @@ services:
       - ollama
     restart: unless-stopped
 
+  # Runs the scheduled maintenance scripts (retention cleanup, staleness
+  # check, weekly digest — see docker/crontab) that used to require a
+  # manually-configured cron entry on the host. Same image as `app`, just a
+  # different entrypoint/command, so it always stays in sync with whatever
+  # code got deployed. Needs root (crond requires it) — unlike `app`, this
+  # service is never network-exposed, so that's a contained trade-off.
+  cron:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    user: root
+    entrypoint: ["/app/docker/cron-entrypoint.sh"]
+    depends_on:
+      - app
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -59,7 +77,25 @@ services:
     ports:
       - "11434:11434"
     restart: unless-stopped
-    # After first start: docker exec -it <container> ollama pull llama3.1:8b
+
+  # One-shot: waits for `ollama` to be ready, pulls OLLAMA_MODEL (already
+  # in .env, used by lib/assistant.ts for the staleness check), then exits.
+  # Re-running is cheap — ollama pull is a no-op once the model is cached in
+  # the ollama_data volume, so it's safe for this to run again on every
+  # `docker compose up`.
+  ollama-pull:
+    image: ollama/ollama:latest
+    env_file:
+      - ../.env
+    depends_on:
+      - ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        export OLLAMA_HOST=http://ollama:11434;
+        until ollama list >/dev/null 2>&1; do sleep 2; done;
+        ollama pull "$${OLLAMA_MODEL:-llama3.1:8b}"
+    restart: "no"
 
 volumes:
   minio_data:

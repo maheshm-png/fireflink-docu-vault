@@ -1,0 +1,7 @@
+# Shell scripts run inside Linux containers — a CRLF shebang line breaks
+# them (`#!/bin/sh\r` isn't a valid interpreter path). Force LF regardless
+# of the checkout platform's autocrlf setting.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+docker/crontab text eol=lf
+Dockerfile text eol=lf

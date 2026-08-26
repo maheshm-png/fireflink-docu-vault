@@ -1,0 +1,10 @@
+# Runs inside the dedicated `cron` compose service (same image as the app,
+# started with `user: root` since crond needs root — the internet-facing
+# `app` service stays non-root). /etc/cron.d format requires the run-as user
+# as the 6th field; jobs go through run-cron-job.sh to pick up the
+# container's runtime env (cron itself doesn't hand its env to job
+# processes). Output goes to the cron container's own stdout so it shows up
+# in `docker logs`.
+0 5 * * * root /app/docker/run-cron-job.sh retention:run >> /proc/1/fd/1 2>&1
+0 6 * * * root /app/docker/run-cron-job.sh staleness:run >> /proc/1/fd/1 2>&1
+0 8 * * 1 root /app/docker/run-cron-job.sh digest:send >> /proc/1/fd/1 2>&1

@@ -50,6 +50,12 @@ The app is containerized (`Dockerfile`) for handoff to devops:
    terminate TLS there — the container itself just listens on port 3000.
 5. **Health check**: `GET /api/health` (used by the image's own
    `HEALTHCHECK` and suitable for a load balancer / orchestrator probe).
+6. **Scheduled jobs run automatically**: the `cron` service in
+   `infra/docker-compose.yml` (same image as `app`) runs
+   `retention:run`/`staleness:run`/`digest:send` on the schedule in
+   `docker/crontab` — no host cron setup needed.
+7. **Ollama model pulled automatically**: the one-shot `ollama-pull` service
+   pulls `OLLAMA_MODEL` once `ollama` is up — no manual `docker exec` step.
 
 ## 1. Provision the free services (local dev / non-Docker deploy)
 
@@ -95,8 +101,9 @@ npm run dev
 
 ## 6. Schedule the background jobs
 
-On the Oracle VM, cron entries:
+Handled automatically by the `cron` service in `infra/docker-compose.yml` when deploying via Docker (see "Production deployment" above) — `docker/crontab` runs `retention:run` daily, `staleness:run` daily, and `digest:send` weekly. Running outside Docker instead? Set up the equivalent host cron entries yourself, e.g.:
 ```
+0 5 * * * cd /path/to/app && npm run retention:run >> /var/log/retention.log 2>&1
 0 6 * * * cd /path/to/app && npm run staleness:run >> /var/log/staleness.log 2>&1
 0 8 * * 1 cd /path/to/app && npm run digest:send >> /var/log/digest.log 2>&1
 ```
