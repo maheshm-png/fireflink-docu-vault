@@ -1,4 +1,6 @@
-import { Fragment } from "react";
+"use client";
+
+import { Fragment, useEffect, useState } from "react";
 import { formatDateTime } from "@/lib/formatDate";
 
 type ReviewRequestRow = {
@@ -71,6 +73,15 @@ export default function ReviewTrail({
   // Published (done) followed by this extra step rather than replacing it.
   revoked?: { byName: string; at: Date; reason: string | null } | null;
 }) {
+  // formatDateTime uses toLocaleString, which resolves to the server's
+  // timezone (UTC in production) during the initial server-rendered pass —
+  // wrong for anyone not in UTC. Gating it behind `mounted` means the first
+  // client render matches that same (date-less) server output, avoiding a
+  // hydration mismatch, then fills in the viewer's actual local time right
+  // after mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const allRounds = [...new Set(reviewRequests.map((r) => r.roundNumber))].sort((a, b) => a - b);
 
   // A round "happened after" the revoke if its earliest row was created at
@@ -120,7 +131,9 @@ export default function ReviewTrail({
       key: "uploaded",
       stage: "done",
       label: "Uploaded",
-      tooltip: `Uploaded by ${uploadedByName} · ${formatDateTime(uploadedAt)}`,
+      tooltip: mounted
+        ? `Uploaded by ${uploadedByName} · ${formatDateTime(uploadedAt)}`
+        : `Uploaded by ${uploadedByName}`,
     },
     ...roundsBeforeRevoke.map(roundStep),
     {
@@ -137,7 +150,7 @@ export default function ReviewTrail({
             label: "Revoked",
             tooltip: [
               `Revoked${revoked?.byName ? ` by ${revoked.byName}` : ""}`,
-              revoked?.at ? formatDateTime(revoked.at) : null,
+              mounted && revoked?.at ? formatDateTime(revoked.at) : null,
               revoked?.reason,
             ]
               .filter(Boolean)
@@ -208,7 +221,7 @@ export default function ReviewTrail({
                 )}
                 {" · assigned by "}
                 {r.requestedBy.name}
-                {r.resolvedAt && ` · ${formatDateTime(r.resolvedAt)}`}
+                {mounted && r.resolvedAt && ` · ${formatDateTime(r.resolvedAt)}`}
                 {!isAutoClosed(r) && r.comments && <> — &ldquo;{r.comments}&rdquo;</>}
               </p>
             ))

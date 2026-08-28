@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "@/components/LocalDateTime";
 
 // Per-document drill-down for the Analytics page's Most Viewed/Most
 // Downloaded tables — clicking the count (not the title, which just opens
@@ -80,7 +80,7 @@ export default async function DocumentActivityPage({
                     <td className="px-4 py-2 text-ff-text">{r.name}</td>
                     <td className="px-4 py-2 text-ff-textMuted">{r.email}</td>
                     <td className="px-4 py-2 text-ff-textMuted">{r.count}</td>
-                    <td className="px-4 py-2 text-ff-textMuted">{formatDateTime(r.lastAt)}</td>
+                    <td className="px-4 py-2 text-ff-textMuted"><LocalDateTime value={r.lastAt} /></td>
                   </tr>
                 ))}
               </tbody>

@@ -4,7 +4,17 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
 import { prisma } from "@/lib/prisma";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "@/components/LocalDateTime";
+
+// AuditLog.action is a raw snake_case identifier ("post_announcement") —
+// forcing it uppercase via CSS just produced "POST_ANNOUNCEMENT", underscore
+// and all. This reads it as actual words instead: "Post Announcement".
+function formatAction(action: string) {
+  return action
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 
 export default async function AuditLogPage() {
   const user = await getCurrentUser();
@@ -37,9 +47,9 @@ export default async function AuditLogPage() {
             <tbody>
               {entries.map((e) => (
                 <tr key={e.id} className="border-t border-ff-border">
-                  <td className="px-4 py-2 text-ff-textMuted">{formatDateTime(e.timestamp)}</td>
+                  <td className="px-4 py-2 text-ff-textMuted"><LocalDateTime value={e.timestamp} /></td>
                   <td className="px-4 py-2">{e.user.name}</td>
-                  <td className="px-4 py-2 uppercase text-ff-textMuted">{e.action}</td>
+                  <td className="px-4 py-2 text-ff-textMuted">{formatAction(e.action)}</td>
                   <td className="px-4 py-2 text-ff-textMuted">
                     {e.documentId ? (
                       <Link href={`/dashboard/documents/${e.documentId}`} className="text-ff-accent hover:underline">

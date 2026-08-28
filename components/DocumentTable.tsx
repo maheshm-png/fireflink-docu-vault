@@ -4,7 +4,7 @@ import DocTypeIcon, { DOC_TYPE_LABEL } from "./DocTypeIcon";
 import DocumentPreview from "./DocumentPreview";
 import DownloadMenu from "./DownloadMenu";
 import LiveNewDocBadge from "./LiveNewDocBadge";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "./LocalDateTime";
 
 export type DocRow = {
   id: string;
@@ -253,7 +253,7 @@ export default function DocumentTable({ rows, hasFilters = false }: { rows: DocR
                   <span className="block truncate" title={doc.uploadedByName}>{doc.uploadedByName}</span>
                 </td>
                 <td className="px-4 py-3 text-ff-textMuted">
-                  <span className="block truncate">{formatDateTime(doc.updatedAt)}</span>
+                  <span className="block truncate"><LocalDateTime value={doc.updatedAt} /></span>
                 </td>
                 <td className="px-4 py-3">
                   {(doc.hasCurrentVersion !== false || doc.externalUrl) && (

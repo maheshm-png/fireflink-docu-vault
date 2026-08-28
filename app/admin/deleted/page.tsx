@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
 import { prisma } from "@/lib/prisma";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "@/components/LocalDateTime";
 import RestoreButton from "./RestoreButton";
 
 const RECOVERY_WINDOW_DAYS = 30;
@@ -63,7 +63,7 @@ export default async function DeletedDocumentsPage() {
                       </td>
                       <td className="px-4 py-3 text-ff-textMuted">{doc.category.name}</td>
                       <td className="px-4 py-3 text-ff-textMuted">{doc.deletedBy?.name ?? "—"}</td>
-                      <td className="px-4 py-3 text-ff-textMuted">{formatDateTime(doc.deletedAt!)}</td>
+                      <td className="px-4 py-3 text-ff-textMuted"><LocalDateTime value={doc.deletedAt!} /></td>
                       <td className="px-4 py-3 text-ff-textMuted">
                         {daysLeft > 0 ? (
                           <span className={daysLeft <= 5 ? "text-ff-warning" : ""}>{daysLeft} day{daysLeft === 1 ? "" : "s"} left</span>

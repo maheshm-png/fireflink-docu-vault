@@ -19,7 +19,7 @@ import LifecycleActions from "./LifecycleActions";
 import SetCurrentVersionButton from "./SetCurrentVersionButton";
 import DocumentPreview from "@/components/DocumentPreview";
 import DownloadMenu from "@/components/DownloadMenu";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "@/components/LocalDateTime";
 import { computeReviewDueDate } from "@/lib/reviewDue";
 import { getAppSettings } from "@/lib/settings";
 import type { CategoryFormField } from "@/lib/formSchema";
@@ -273,7 +273,7 @@ export default async function DocumentDetailPage({ params }: { params: { id: str
         {isDeleted && (
           <div className="mb-6 rounded-ff border border-ff-danger/40 bg-ff-danger/10 p-3 text-sm text-ff-text">
             This document was deleted by {document.deletedBy?.name ?? "a manager"} on{" "}
-            {document.deletedAt && formatDateTime(document.deletedAt)}. It will be permanently removed after the
+            {document.deletedAt && <LocalDateTime value={document.deletedAt} />}. It will be permanently removed after the
             configured retention window (see Settings) unless restored.
           </div>
         )}
@@ -292,7 +292,7 @@ export default async function DocumentDetailPage({ params }: { params: { id: str
         {!isDeleted && document.status === "revoked" && (
           <div className="mb-6 rounded-ff border border-ff-danger/40 bg-ff-danger/10 p-3 text-sm text-ff-text">
             Revoked{document.revokedBy && <> by {document.revokedBy.name}</>}
-            {document.revokedAt && <> on {formatDateTime(document.revokedAt)}</>}. Hidden from the public
+            {document.revokedAt && <> on <LocalDateTime value={document.revokedAt} /></>}. Hidden from the public
             dashboard until it&apos;s re-approved.
             {document.revokeReason && (
               <>
@@ -439,7 +439,7 @@ export default async function DocumentDetailPage({ params }: { params: { id: str
                     </td>
                     <td className="px-4 py-2 text-ff-textMuted">{v.uploadedBy.name}</td>
                     <td className="px-4 py-2 text-ff-textMuted">
-                      {formatDateTime(v.uploadedAt)}
+                      <LocalDateTime value={v.uploadedAt} />
                     </td>
                     <td className="px-4 py-2 text-ff-textMuted">{v.changelog || "—"}</td>
                     <td className="px-4 py-2">
