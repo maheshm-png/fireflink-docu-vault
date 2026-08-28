@@ -54,6 +54,20 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
     env_file:
       - ../.env
+    # supabase_default: joins self-hosted Supabase's own docker-compose
+    # network (created by devops's separate `docker compose up` for that
+    # stack — this is its auto-generated project network name) so the app
+    # can reach Supabase's Postgres over the internal Docker network
+    # instead of a public hostname/port. `default` is listed explicitly
+    # alongside it because specifying `networks:` at all opts a service out
+    # of the implicit default network unless it's named here too — without
+    # it, caddy/minio/meilisearch (still only on `default`) couldn't reach
+    # this service. No host port published: caddy is the only public
+    # entrypoint (see the top-of-file comment), reaching this over
+    # `default` at app:3000.
+    networks:
+      - default
+      - supabase_default
     depends_on:
       - minio
       - meilisearch
@@ -73,6 +87,9 @@ services:
       - ../.env
     user: root
     entrypoint: ["/app/docker/cron-entrypoint.sh"]
+    networks:
+      - default
+      - supabase_default
     depends_on:
       - app
     restart: unless-stopped
@@ -164,3 +181,11 @@ volumes:
   ollama_data:
   caddy_data:
   caddy_config:
+
+# The self-hosted Supabase stack's own docker-compose project created this
+# network; `external: true` tells Compose to join it rather than create its
+# own, so it must already exist (i.e. that stack already be running) before
+# `docker compose up` here.
+networks:
+  supabase_default:
+    external: true
