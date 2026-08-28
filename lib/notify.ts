@@ -1,5 +1,6 @@
 import { notifyGChat, notifyGChatManager } from "./gchat";
 import { createNotifications } from "./notifications";
+import { sendEmail } from "./email";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -24,6 +25,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 // reviewer's comments (required on reject, see ReviewActions.tsx).
 export async function notifyReviewDecision(params: {
   uploaderName: string;
+  uploaderEmail: string;
   documentTitle: string;
   documentId: string;
   decision: "approved" | "rejected";
@@ -36,6 +38,16 @@ export async function notifyReviewDecision(params: {
   if (params.comments) lines.push(`Reviewer comments: ${params.comments}`);
   lines.push(`View: ${APP_URL}/dashboard/documents/${params.documentId}`);
   await notifyGChat(lines.join("\n"));
+
+  await sendEmail({
+    to: params.uploaderEmail,
+    subject: `"${params.documentTitle}" was ${params.decision}`,
+    html: `
+      <p>Your submission "<strong>${params.documentTitle}</strong>" ${verb}.</p>
+      ${params.comments ? `<p><strong>Reviewer comments:</strong> ${params.comments}</p>` : ""}
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View document</a></p>
+    `,
+  });
 }
 
 /**
@@ -139,6 +151,7 @@ export async function notifyManagerReviewNeeded(params: {
   uploaderName: string;
   reviewerId: string;
   reviewerName: string;
+  reviewerEmail: string;
   isNewVersion: boolean;
   versionNumber?: number;
 }) {
@@ -170,6 +183,18 @@ export async function notifyManagerReviewNeeded(params: {
       documentTitle: params.documentTitle,
     },
   ]);
+
+  await sendEmail({
+    to: params.reviewerEmail,
+    subject: `Review needed: ${params.documentTitle}`,
+    html: `
+      <p>${submissionType}</p>
+      <p><strong>Title:</strong> ${params.documentTitle}<br/>
+      <strong>Category:</strong> ${params.categoryName}<br/>
+      <strong>Submitted by:</strong> ${params.uploaderName}</p>
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review it</a></p>
+    `,
+  });
 }
 
 /**
@@ -212,6 +237,38 @@ export async function notifyReviewerAssigned(params: {
       documentTitle: params.documentTitle,
     },
   ]);
+}
+
+/**
+ * Emailed to everyone who previously downloaded ANY earlier version of this
+ * document — they have a stale copy sitting on their machine and have no
+ * other way of knowing a newer one just went live (unlike the in-app bell,
+ * which only reaches people still visiting the site). Fires on every
+ * approval alongside notifyReviewDecision/notifyDocumentPublished above,
+ * regardless of the manager's announceToAll choice — this is a targeted
+ * courtesy to people who already have a copy, not a broadcast decision.
+ * Naturally no-ops for a document's first-ever publish, since there's
+ * nobody to have downloaded a "previous" version of it yet.
+ */
+export async function notifyNewVersionAvailable(params: {
+  documentTitle: string;
+  documentId: string;
+  versionNumber: number;
+  recipients: { email: string; name: string }[];
+}) {
+  await Promise.all(
+    params.recipients.map((r) =>
+      sendEmail({
+        to: r.email,
+        subject: `New version available: ${params.documentTitle}`,
+        html: `
+          <p>Hi ${r.name},</p>
+          <p>A new version (v${params.versionNumber}) of "<strong>${params.documentTitle}</strong>" — a document you previously downloaded — is now available. The copy you have may be outdated.</p>
+          <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View the latest version</a></p>
+        `,
+      })
+    )
+  );
 }
 
 export async function notifyManagerRetentionAlert(params: {

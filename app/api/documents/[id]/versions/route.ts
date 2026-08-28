@@ -192,6 +192,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploaderName: user.name,
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,
+      reviewerEmail: reviewer.email,
       isNewVersion: true,
       versionNumber: nextVersionNumber,
     });

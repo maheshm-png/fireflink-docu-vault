@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { indexDocument } from "@/lib/search";
 import { logAudit } from "@/lib/audit";
-import { notifyReviewDecision, notifyDocumentPublished, notifyReviewerAssigned } from "@/lib/notify";
+import { notifyReviewDecision, notifyDocumentPublished, notifyReviewerAssigned, notifyNewVersionAvailable } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
 
 // POST /api/documents/:id/review
@@ -215,6 +215,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await logAudit({ userId: user.id, action: "reject", documentId: rejected.id, documentTitle: rejected.title });
     await notifyReviewDecision({
       uploaderName: rejected.uploadedBy.name,
+      uploaderEmail: rejected.uploadedBy.email,
       documentTitle: rejected.title,
       documentId: rejected.id,
       decision: "rejected",
@@ -290,6 +291,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   await notifyReviewDecision({
     uploaderName: published.uploadedBy.name,
+    uploaderEmail: published.uploadedBy.email,
     documentTitle: published.title,
     documentId: published.id,
     decision: "approved",
@@ -313,6 +315,29 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploaderName: published.uploadedBy.name,
       recipients,
     });
+  }
+
+  // Separate from the announceToAll broadcast above — a targeted courtesy
+  // to people who already have a (now outdated) copy of this specific
+  // document, regardless of whether the manager chose to announce it more
+  // broadly. Only meaningful once there's an actual version to name; a
+  // link document (docType "link") has no versions. Naturally sends to
+  // nobody on a document's first-ever publish, since nobody could have
+  // downloaded a "previous" version of it yet.
+  if (published.currentVersion) {
+    const priorDownloaders = await prisma.auditLog.findMany({
+      where: { documentId: published.id, action: "download", userId: { not: published.uploadedById } },
+      distinct: ["userId"],
+      select: { user: { select: { email: true, name: true } } },
+    });
+    if (priorDownloaders.length > 0) {
+      await notifyNewVersionAvailable({
+        documentTitle: published.title,
+        documentId: published.id,
+        versionNumber: published.currentVersion.versionNumber,
+        recipients: priorDownloaders.map((d) => d.user),
+      });
+    }
   }
 
   // { id, status } only — the full record's currentVersion.fileSize is a

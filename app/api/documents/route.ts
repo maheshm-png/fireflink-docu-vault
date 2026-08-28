@@ -227,6 +227,7 @@ export async function POST(req: NextRequest) {
     uploaderName: user.name,
     reviewerId: document.ownerId,
     reviewerName: document.owner.name,
+    reviewerEmail: document.owner.email,
     isNewVersion: false,
   });
 

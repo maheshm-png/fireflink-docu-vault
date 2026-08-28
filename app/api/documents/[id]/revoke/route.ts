@@ -59,7 +59,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // somehow left no active manager behind — better than blocking the revoke
   // entirely over a re-review assignment that a manager can always fix
   // afterward via Reassign.
-  const reviewers = previousReviewers.length > 0 ? previousReviewers : [{ id: document.ownerId, name: null as string | null }];
+  const reviewers =
+    previousReviewers.length > 0
+      ? previousReviewers
+      : [{ id: document.ownerId, name: null as string | null, email: null as string | null }];
   const nextRound = (maxRoundSoFar._max.roundNumber ?? 0) + 1;
 
   await prisma.document.update({
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await logAudit({ userId: user.id, action: "revoke", documentId: document.id, documentTitle: document.title });
 
   for (const reviewer of reviewers) {
-    if (!reviewer.name) continue;
+    if (!reviewer.name || !reviewer.email) continue;
     await notifyManagerReviewNeeded({
       documentTitle: document.title,
       documentId: document.id,
@@ -89,6 +92,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploaderName: user.name,
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,
+      reviewerEmail: reviewer.email,
       isNewVersion: false,
     });
   }
