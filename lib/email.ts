@@ -27,6 +27,29 @@ function getTransporter() {
   return cachedTransporter;
 }
 
+/**
+ * Consistent formal letterhead/signature for every outgoing email — callers
+ * (lib/notify.ts) only supply the body content, so every notification reads
+ * as one official, consistent piece of correspondence rather than each
+ * being separately (and inconsistently) formatted.
+ */
+function renderFormalEmail(bodyHtml: string) {
+  return `
+    <div style="font-family: Arial, Helvetica, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a;">
+      <div style="padding: 20px 0; border-bottom: 2px solid #5b2a86;">
+        <span style="font-size: 18px; font-weight: bold; color: #5b2a86;">FireFlink Docu Vault</span>
+      </div>
+      <div style="padding: 24px 0; font-size: 14px; line-height: 1.6;">
+        ${bodyHtml}
+      </div>
+      <div style="padding-top: 16px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+        <p>Regards,<br/>FireFlink Docu Vault Team</p>
+        <p>This is an automated notification. Please do not reply to this email.</p>
+      </div>
+    </div>
+  `;
+}
+
 export async function sendEmail(params: { to: string; subject: string; html: string }) {
   const transporter = getTransporter();
   if (!transporter) return; // no-op until SMTP_HOST is configured
@@ -39,7 +62,7 @@ export async function sendEmail(params: { to: string; subject: string; html: str
       from: `"${fromName}" <${fromEmail}>`,
       to: params.to,
       subject: params.subject,
-      html: params.html,
+      html: renderFormalEmail(params.html),
     });
   } catch (err) {
     console.error(`Email send failed (to ${params.to}, subject "${params.subject}"):`, err);

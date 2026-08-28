@@ -39,13 +39,17 @@ export async function notifyReviewDecision(params: {
   lines.push(`View: ${APP_URL}/dashboard/documents/${params.documentId}`);
   await notifyGChat(lines.join("\n"));
 
+  const decisionText =
+    params.decision === "approved" ? "has been approved and is now published" : "has been returned for revision";
   await sendEmail({
     to: params.uploaderEmail,
-    subject: `"${params.documentTitle}" was ${params.decision}`,
+    subject: `Document ${params.decision}: ${params.documentTitle}`,
     html: `
-      <p>Your submission "<strong>${params.documentTitle}</strong>" ${verb}.</p>
-      ${params.comments ? `<p><strong>Reviewer comments:</strong> ${params.comments}</p>` : ""}
-      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View document</a></p>
+      <p>Dear ${params.uploaderName},</p>
+      <p>Your submission, "<strong>${params.documentTitle}</strong>," ${decisionText}.</p>
+      ${params.comments ? `<p><strong>Reviewer Comments:</strong> ${params.comments}</p>` : ""}
+      <p>You may view the document using the link below.</p>
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Document</a></p>
     `,
   });
 }
@@ -156,8 +160,8 @@ export async function notifyManagerReviewNeeded(params: {
   versionNumber?: number;
 }) {
   const submissionType = params.isNewVersion
-    ? `New version submitted — v${params.versionNumber}`
-    : "New document submitted";
+    ? `A new version (v${params.versionNumber})`
+    : "A new document";
   await notifyGChatManager(
     [
       "Action required: document pending review",
@@ -186,13 +190,17 @@ export async function notifyManagerReviewNeeded(params: {
 
   await sendEmail({
     to: params.reviewerEmail,
-    subject: `Review needed: ${params.documentTitle}`,
+    subject: `Review Required: ${params.documentTitle}`,
     html: `
-      <p>${submissionType}</p>
-      <p><strong>Title:</strong> ${params.documentTitle}<br/>
-      <strong>Category:</strong> ${params.categoryName}<br/>
-      <strong>Submitted by:</strong> ${params.uploaderName}</p>
-      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review it</a></p>
+      <p>Dear ${params.reviewerName},</p>
+      <p>${submissionType} has been submitted and requires your review.</p>
+      <p>
+        <strong>Title:</strong> ${params.documentTitle}<br/>
+        <strong>Category:</strong> ${params.categoryName}<br/>
+        <strong>Submitted By:</strong> ${params.uploaderName}
+      </p>
+      <p>Please review the submission using the link below.</p>
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review Document</a></p>
     `,
   });
 }
@@ -260,11 +268,12 @@ export async function notifyNewVersionAvailable(params: {
     params.recipients.map((r) =>
       sendEmail({
         to: r.email,
-        subject: `New version available: ${params.documentTitle}`,
+        subject: `New Version Available: ${params.documentTitle}`,
         html: `
-          <p>Hi ${r.name},</p>
-          <p>A new version (v${params.versionNumber}) of "<strong>${params.documentTitle}</strong>" — a document you previously downloaded — is now available. The copy you have may be outdated.</p>
-          <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View the latest version</a></p>
+          <p>Dear ${r.name},</p>
+          <p>A new version (Version ${params.versionNumber}) of "<strong>${params.documentTitle}</strong>" is now available. Please note that the copy you previously downloaded may no longer be current.</p>
+          <p>We recommend downloading the latest version at your earliest convenience.</p>
+          <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Latest Version</a></p>
         `,
       })
     )
