@@ -54,6 +54,8 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
     env_file:
       - ../.env
+    ports:
+      - "3001:3000"
     # supabase_default: joins self-hosted Supabase's own docker-compose
     # network (created by devops's separate `docker compose up` for that
     # stack — this is its auto-generated project network name) so the app
@@ -62,9 +64,7 @@ services:
     # alongside it because specifying `networks:` at all opts a service out
     # of the implicit default network unless it's named here too — without
     # it, caddy/minio/meilisearch (still only on `default`) couldn't reach
-    # this service. No host port published: caddy is the only public
-    # entrypoint (see the top-of-file comment), reaching this over
-    # `default` at app:3000.
+    # this service.
     networks:
       - default
       - supabase_default
@@ -105,8 +105,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: "admin"
+      MINIO_ROOT_PASSWORD: "admin12345"
     volumes:
       - minio_data:/data
     ports:
