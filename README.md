@@ -53,6 +53,15 @@ The app is containerized (`Dockerfile`) for handoff to devops:
    `.env.example`, fill in real values (including both `DATABASE_URL`, the
    pooled connection, and `DIRECT_URL`, the direct one — see the comments in
    `.env.example` and `prisma/schema.prisma`).
+   **Important**: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   and `NEXT_PUBLIC_APP_URL` must *also* be set in `infra/.env` (copy from
+   `infra/.env.example`), with the exact same real values as the root
+   `.env` — `next build` compiles these into the browser-side JS bundle, so
+   they have to be correct at image build time, not just container
+   runtime. If you ever rotate the Supabase anon key or change domains,
+   update both files and rebuild (`docker compose up -d --build app`) — a
+   runtime-only `.env` change won't retroactively fix an already-built
+   image.
 4. **Two one-time setup steps Docker doesn't do for you**:
    - Create the MinIO bucket (`MINIO_BUCKET`, `fireflink-docs` by default)
      via the MinIO console (port 9001) or `mc mb` — nothing creates it
@@ -67,10 +76,15 @@ The app is containerized (`Dockerfile`) for handoff to devops:
    migrations on its own — no separate manual step. Still paste
    `prisma/rls_policies.sql` into the Supabase SQL editor once, after the
    first migration.
-6. **Reverse proxy + TLS**: put the host behind Caddy/nginx/similar and
-   terminate TLS there for the app and MinIO (Meilisearch and Ollama don't
-   need this — see step 2). The app container itself just listens on plain
-   HTTP port 3000.
+6. **Reverse proxy + TLS — handled by the `caddy` service**: it's the only
+   thing in `infra/docker-compose.yml` bound to the host's public ports
+   (80/443); app/minio/meilisearch/ollama aren't published to the host at
+   all, only reachable from other containers on the compose network. Set
+   `APP_DOMAIN` and `MINIO_ENDPOINT_DOMAIN` in `infra/.env` (copy from
+   `infra/.env.example`), point DNS for both at this host, and Caddy
+   auto-provisions Let's Encrypt certs for them on first start — nothing
+   else to configure. See `infra/Caddyfile` for the mapping (and how to add
+   a public console domain for MinIO if you want one).
 7. **Health check**: `GET /api/health` (used by the image's own
    `HEALTHCHECK` and suitable for a load balancer / orchestrator probe).
 8. **Scheduled jobs run automatically**: the `cron` service in

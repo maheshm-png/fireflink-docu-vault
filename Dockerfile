@@ -15,18 +15,38 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Placeholder values needed only so that build-time steps don't fail:
+
+# NEXT_PUBLIC_* vars are special: `next build` compiles them directly into
+# the browser-side JS bundle (e.g. app/login/page.tsx's client-side
+# `createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, ...)`).
+# Setting them as a plain runtime ENV in the runner stage below has NO
+# effect on code that's already been compiled — the value has to be
+# correct HERE, at build time. Real deployments MUST pass these via
+# --build-arg / docker-compose's build.args (see infra/docker-compose.yml
+# and infra/.env.example) with the actual production values, or the app
+# will be permanently built pointing at a fake auth endpoint. The defaults
+# below exist only so a build without them doesn't fail outright (e.g. a
+# local test build that never logs in) — never rely on them for a real
+# deployment.
+ARG NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+
+# Everything below is server-only (no NEXT_PUBLIC_ prefix) — read fresh
+# from process.env at runtime, never compiled into client code. These
+# placeholders only need to exist so build-time steps don't fail:
 # - DATABASE_URL/DIRECT_URL: `prisma generate` validates the referenced env
 #   vars exist, even though it never connects to them.
-# - The Supabase vars: Next.js executes route handlers (e.g.
+# - The rest: Next.js executes route handlers (e.g.
 #   app/api/admin/users/route.ts) during "collect page data" to trace their
-#   dependencies, and that module creates a Supabase client at import time.
-# None of these values are baked into the final image or used at runtime —
-# the runner stage gets the real ones from the environment.
+#   dependencies, and those modules create clients at import time.
+# The runner stage below gets the real values for these from the container
+# environment at startup, same as any other server-side config.
 ENV DATABASE_URL="postgresql://user:pass@localhost:5432/db"
 ENV DIRECT_URL="postgresql://user:pass@localhost:5432/db"
-ENV NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321"
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY="placeholder"
 ENV SUPABASE_SERVICE_ROLE_KEY="placeholder"
 ENV MEILISEARCH_HOST="http://localhost:7700"
 ENV MINIO_ACCESS_KEY="placeholder"

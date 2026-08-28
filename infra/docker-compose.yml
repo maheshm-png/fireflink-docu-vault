@@ -1,8 +1,15 @@
-# Production deployment.
-# Run: docker compose up -d --build   (from this directory)
-# Put this host's public IP/domain behind a reverse proxy with TLS (e.g.
-# Caddy/nginx) before pointing NEXT_PUBLIC_APP_URL / MINIO_ENDPOINT /
-# MEILISEARCH_HOST at it.
+# Local dev AND production deployment — same file, run from this directory.
+# Local dev: `docker compose up -d minio minio-init meilisearch ollama
+# ollama-pull` (skip app/cron/caddy), then `npm run dev` on the host.
+# Production: `docker compose up -d --build` (everything, including app).
+#
+# `caddy` (below) is the only service bound to a public interface (ports
+# 80/443, for TLS). minio/meilisearch/ollama bind their ports to 127.0.0.1
+# only — reachable from this host itself (so local `npm run dev` can hit
+# localhost:9000/7700/11434) but never from the public internet, including
+# when this file runs on a production VM with a public IP. Point DNS for
+# APP_DOMAIN and MINIO_ENDPOINT_DOMAIN (infra/.env) at that VM before
+# starting a production deploy.
 #
 # This brings up the app plus its self-hosted MinIO/Meilisearch/Ollama
 # dependencies. Self-hosted Supabase (auth + Postgres) is deployed
@@ -11,17 +18,42 @@
 # app's SUPABASE_*/DATABASE_URL/DIRECT_URL vars at wherever that stack
 # ends up running (same Docker network, another host, etc.).
 
-version: "3.9"
-
 services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      MINIO_ENDPOINT_DOMAIN: ${MINIO_ENDPOINT_DOMAIN}
+      MINIO_CONSOLE_DOMAIN: ${MINIO_CONSOLE_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - minio
+    restart: unless-stopped
+
   app:
+    image: fireflink-deck-vault-app:latest
     build:
       context: ..
       dockerfile: Dockerfile
+      # These get compiled into the browser-side JS bundle at build time —
+      # see the Dockerfile's comment. Must be the REAL production values,
+      # not the app's runtime .env — Compose resolves ${...} here from
+      # infra/.env (this project's own env file), so these three also need
+      # to exist there (same values as the root .env), not just in
+      # ../.env. See infra/.env.example.
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
     env_file:
       - ../.env
-    ports:
-      - "3000:3000"
     depends_on:
       - minio
       - meilisearch
@@ -30,14 +62,13 @@ services:
 
   # Runs the scheduled maintenance scripts (retention cleanup, staleness
   # check, weekly digest — see docker/crontab) that used to require a
-  # manually-configured cron entry on the host. Same image as `app`, just a
-  # different entrypoint/command, so it always stays in sync with whatever
-  # code got deployed. Needs root (crond requires it) — unlike `app`, this
+  # manually-configured cron entry on the host. Same image as `app` (no
+  # `build:` here — reuses whatever `app` already built, so it's always in
+  # sync with the deployed code without a second build), just a different
+  # entrypoint/command. Needs root (crond requires it) — unlike `app`, this
   # service is never network-exposed, so that's a contained trade-off.
   cron:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    image: fireflink-deck-vault-app:latest
     env_file:
       - ../.env
     user: root
@@ -46,6 +77,13 @@ services:
       - app
     restart: unless-stopped
 
+  # Ports bind to 127.0.0.1 only — reachable from this host (so `npm run
+  # dev` running directly on your machine can still hit localhost:9000/9001
+  # for local development) but NOT from the public internet when this same
+  # compose file runs on a production VM with a public IP. Caddy and
+  # app/cron reach it via the internal compose network regardless of this
+  # binding (container-to-container traffic never goes through the host's
+  # published ports).
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -55,10 +93,32 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     restart: unless-stopped
 
+  # One-shot: waits for MinIO, creates MINIO_BUCKET if it doesn't already
+  # exist, then exits. minio/minio doesn't bundle the `mc` client (that's
+  # this separate minio/mc image) and nothing else creates the bucket —
+  # without it, every upload fails outright. `mc mb --ignore-existing` is
+  # safe to re-run on every `docker compose up`.
+  minio-init:
+    image: minio/mc:latest
+    env_file:
+      - ../.env
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" >/dev/null 2>&1; do sleep 2; done;
+        mc mb --ignore-existing "local/$${MINIO_BUCKET:-fireflink-docs}"
+    restart: "no"
+
+  # Called server-side by the containerized app via meilisearch:7700 in
+  # production, and needs localhost:7700 for `npm run dev` running directly
+  # on the host in local dev — same 127.0.0.1-only reasoning as minio above,
+  # never reachable from the public internet either way.
   meilisearch:
     image: getmeili/meilisearch:v1.10
     environment:
@@ -67,15 +127,16 @@ services:
     volumes:
       - meili_data:/meili_data
     ports:
-      - "7700:7700"
+      - "127.0.0.1:7700:7700"
     restart: unless-stopped
 
+  # Same reasoning as meilisearch above.
   ollama:
     image: ollama/ollama:latest
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     restart: unless-stopped
 
   # One-shot: waits for `ollama` to be ready, pulls OLLAMA_MODEL (already
@@ -101,3 +162,5 @@ volumes:
   minio_data:
   meili_data:
   ollama_data:
+  caddy_data:
+  caddy_config:

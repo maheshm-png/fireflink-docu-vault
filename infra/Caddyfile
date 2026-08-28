@@ -1,0 +1,29 @@
+# Caddy auto-provisions and renews Let's Encrypt certs for any domain listed
+# here — the only requirements are that APP_DOMAIN/MINIO_ENDPOINT_DOMAIN
+# (set in infra/.env) actually resolve to this host's public IP, and ports
+# 80/443 are open to the internet. Both vars must be non-empty — an unset
+# `{$VAR}` is a hard parse error, unlike a normal shell default-expansion.
+#
+# Meilisearch and Ollama aren't listed here on purpose — see .env.example's
+# comments on MEILISEARCH_HOST/OLLAMA_HOST. They're only ever called
+# server-to-server (app -> meilisearch:7700, app -> ollama:11434 on the
+# Docker network), so they never need a public hostname or TLS.
+
+{$APP_DOMAIN} {
+	reverse_proxy app:3000
+}
+
+# MinIO's S3 API — MUST be public: presigned upload/download URLs go
+# straight to the end user's browser, not just server-to-server.
+{$MINIO_ENDPOINT_DOMAIN} {
+	reverse_proxy minio:9000
+}
+
+# MinIO's web console (bucket creation, browsing objects without SSHing in
+# and using `mc`) — optional. Uncomment and add MINIO_CONSOLE_DOMAIN to
+# infra/.env if you want it exposed; otherwise reach it via
+# `docker compose exec minio mc ...` or an SSH tunnel to port 9001 instead.
+#
+# {$MINIO_CONSOLE_DOMAIN} {
+# 	reverse_proxy minio:9001
+# }
