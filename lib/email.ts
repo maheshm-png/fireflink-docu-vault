@@ -50,14 +50,22 @@ function renderFormalEmail(bodyHtml: string) {
   `;
 }
 
+/**
+ * Everything in here is wrapped in one try/catch, including getTransporter()
+ * — a malformed SMTP_* value (e.g. a non-numeric SMTP_PORT) can make
+ * nodemailer.createTransport() throw synchronously, and this function is
+ * awaited directly from upload/approve/reject routes with no try/catch of
+ * their own. Letting anything here escape would turn a bad email config
+ * into those core actions failing outright, not just the notification.
+ */
 export async function sendEmail(params: { to: string; subject: string; html: string }) {
-  const transporter = getTransporter();
-  if (!transporter) return; // no-op until SMTP_HOST is configured
-
-  const fromName = process.env.SMTP_FROM_NAME || "FireFlink Docu Vault";
-  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-
   try {
+    const transporter = getTransporter();
+    if (!transporter) return; // no-op until SMTP_HOST is configured
+
+    const fromName = process.env.SMTP_FROM_NAME || "FireFlink Docu Vault";
+    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
     await transporter.sendMail({
       from: `"${fromName}" <${fromEmail}>`,
       to: params.to,
