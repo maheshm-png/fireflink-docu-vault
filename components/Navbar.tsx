@@ -37,6 +37,7 @@ export default function Navbar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [resetStatus, setResetStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [resetErrorMessage, setResetErrorMessage] = useState<string | null>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // Full path+query, so a dropdown item like "/dashboard/pending?status=
@@ -66,10 +67,16 @@ export default function Navbar({
 
   async function handleResetPassword() {
     setResetStatus("sending");
+    setResetErrorMessage(null);
     const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    setResetStatus(error ? "error" : "sent");
+    if (error) {
+      setResetErrorMessage(error.message);
+      setResetStatus("error");
+      return;
+    }
+    setResetStatus("sent");
   }
 
   async function handleLogout() {
@@ -236,7 +243,9 @@ export default function Navbar({
                     <p className="mt-1 px-1.5 text-xs text-ff-success">Check your email for a reset link.</p>
                   )}
                   {resetStatus === "error" && (
-                    <p className="mt-1 px-1.5 text-xs text-ff-danger">Could not send the reset link — please try again.</p>
+                    <p className="mt-1 px-1.5 text-xs text-ff-danger">
+                      {resetErrorMessage ?? "Could not send the reset link. Please try again."}
+                    </p>
                   )}
                 </div>
               </div>

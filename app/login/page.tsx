@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [forgotMode, setForgotMode] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetStatus, setResetStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [resetErrorMessage, setResetErrorMessage] = useState<string | null>(null);
 
   // Brief branded intro on first landing on the login screen — logo animates
   // in, holds, then fades to reveal the sign-in form underneath (which is
@@ -54,10 +55,16 @@ export default function LoginPage() {
   async function handleResetRequest(e: React.FormEvent) {
     e.preventDefault();
     setResetStatus("sending");
+    setResetErrorMessage(null);
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    setResetStatus(error ? "error" : "sent");
+    if (error) {
+      setResetErrorMessage(error.message);
+      setResetStatus("error");
+      return;
+    }
+    setResetStatus("sent");
   }
 
   return (
@@ -185,7 +192,7 @@ export default function LoginPage() {
                     />
                   </div>
                   <AlertModal
-                    message={resetStatus === "error" ? "Could not send reset link — try again." : null}
+                    message={resetStatus === "error" ? resetErrorMessage ?? "Could not send reset link. Please try again." : null}
                     onClose={() => setResetStatus("idle")}
                   />
                   <button
