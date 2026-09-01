@@ -8,6 +8,12 @@ import DynamicField from "@/components/DynamicField";
 import AlertModal from "@/components/AlertModal";
 import InfoTooltip from "@/components/InfoTooltip";
 
+// Must match next.config.js's serverActions.bodySizeLimit — this is only a
+// client-side heads-up so the uploader isn't left waiting through a full
+// transfer before finding out; the real enforcement is server-side.
+const MAX_UPLOAD_SIZE_MB = 500;
+const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+
 type Category = {
   id: string;
   name: string;
@@ -210,9 +216,19 @@ export default function UploadForm({
           <input
             required
             type="file"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              const picked = e.target.files?.[0] ?? null;
+              if (picked && picked.size > MAX_UPLOAD_SIZE_BYTES) {
+                setError(`"${picked.name}" is ${(picked.size / (1024 * 1024)).toFixed(0)} MB, which is over the ${MAX_UPLOAD_SIZE_MB} MB limit. Choose a smaller file.`);
+                e.target.value = "";
+                setFile(null);
+                return;
+              }
+              setFile(picked);
+            }}
             className="w-full rounded-ff border border-ff-border px-3 py-2 text-sm"
           />
+          <p className="mt-1 text-xs text-ff-textMuted">Maximum file size: {MAX_UPLOAD_SIZE_MB} MB</p>
         </div>
 
         {schema.length > 0 && (
