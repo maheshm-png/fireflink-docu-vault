@@ -94,13 +94,15 @@ services:
       - app
     restart: unless-stopped
 
-  # Ports bind to 127.0.0.1 only — reachable from this host (so `npm run
-  # dev` running directly on your machine can still hit localhost:9000/9001
-  # for local development) but NOT from the public internet when this same
-  # compose file runs on a production VM with a public IP. Caddy and
-  # app/cron reach it via the internal compose network regardless of this
-  # binding (container-to-container traffic never goes through the host's
-  # published ports).
+  # Published on all interfaces (not 127.0.0.1-only) because this is
+  # currently being run without `caddy` in front of it — browsers need to
+  # reach MinIO directly for presigned upload/download URLs, and there's no
+  # domain yet for Caddy to get a TLS cert for anyway (Let's Encrypt doesn't
+  # issue certs for bare IP addresses). Once a real domain + caddy are
+  # actually in use, switch this back to "127.0.0.1:9000:9000" /
+  # "127.0.0.1:9001:9001" — caddy reaches it over the internal compose
+  # network either way, so that binding never affects it, only direct
+  # public access to this raw port.
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -110,8 +112,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "9000:9000"
+      - "9001:9001"
     restart: unless-stopped
 
   # One-shot: waits for MinIO, creates MINIO_BUCKET if it doesn't already
