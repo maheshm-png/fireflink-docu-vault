@@ -11,5 +11,16 @@ const nextConfig = {
     // away by disabling this.
     staleTimes: { dynamic: 0 },
   },
+  // pdfjs-dist (components/PdfHighlightViewer.tsx) bundles a Node-only
+  // fallback path that `require`s the native `canvas` package for
+  // server-side PDF rendering — code that never actually runs in the
+  // browser (we only ever load pdfjs-dist client-side), but webpack still
+  // tries to statically resolve it when bundling and fails since it isn't
+  // installed (nor wanted — it's a native binary with no purpose here).
+  // Aliasing it to false tells webpack to stub it out instead.
+  webpack: (config) => {
+    config.resolve.alias.canvas = false;
+    return config;
+  },
 };
 module.exports = nextConfig;

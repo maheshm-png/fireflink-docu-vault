@@ -174,13 +174,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
-  const { decision, comments, announceToAll, versionId } = body;
+  const { decision, comments, announceToAll, allowFeedback, versionId } = body;
   if (!["approved", "rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
   if (decision === "approved" && typeof announceToAll !== "boolean") {
     return NextResponse.json(
       { error: "announceToAll must be true or false — choose whether to notify all users before approving." },
+      { status: 400 }
+    );
+  }
+  if (decision === "approved" && typeof allowFeedback !== "boolean") {
+    return NextResponse.json(
+      { error: "allowFeedback must be true or false — choose whether to accept feedback before approving." },
       { status: 400 }
     );
   }
@@ -213,6 +219,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await logAudit({ userId: user.id, action: "reject", documentId: rejected.id, documentTitle: rejected.title });
+
+    // This reviewer's own inline (highlight-and-comment) feedback from this
+    // same round, batched into the same decision notice — additive to the
+    // existing `comments` box above, not a replacement for it.
+    const inlineComments = await prisma.inlineComment.findMany({
+      where: { reviewRequestId: myRequest.id },
+      orderBy: { createdAt: "asc" },
+      select: { highlightedText: true, comment: true },
+    });
+
     await notifyReviewDecision({
       uploaderName: rejected.uploadedBy.name,
       uploaderEmail: rejected.uploadedBy.email,
@@ -220,6 +236,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       documentId: rejected.id,
       decision: "rejected",
       comments,
+      inlineComments,
     });
 
     return NextResponse.json({ document: { id: rejected.id, status: rejected.status } });
@@ -267,6 +284,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     data: {
       status: "published",
       lastReviewedAt: new Date(),
+      feedbackEnabled: allowFeedback,
       ...(currentVersionId ? { currentVersionId } : {}),
     },
     include: { category: true, currentVersion: true, uploadedBy: true, duplicateOf: true },
@@ -289,6 +307,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   await logAudit({ userId: user.id, action: "approve", documentId: published.id, documentTitle: published.title });
 
+  // This reviewer's own inline (highlight-and-comment) feedback from this
+  // same round, batched into the same decision notice — additive to the
+  // existing `comments` box above, not a replacement for it.
+  const inlineComments = await prisma.inlineComment.findMany({
+    where: { reviewRequestId: myRequest.id },
+    orderBy: { createdAt: "asc" },
+    select: { highlightedText: true, comment: true },
+  });
+
   await notifyReviewDecision({
     uploaderName: published.uploadedBy.name,
     uploaderEmail: published.uploadedBy.email,
@@ -296,6 +323,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     documentId: published.id,
     decision: "approved",
     comments,
+    inlineComments,
   });
 
   // Broadcast to the whole org on publish — separate from the uploader's

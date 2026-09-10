@@ -15,6 +15,7 @@ export default function DocumentPreview({
   externalUrl,
   label = "Preview",
   variant = "button",
+  restrictToolbar = false,
 }: {
   documentId: string;
   docType: string;
@@ -31,6 +32,17 @@ export default function DocumentPreview({
   /** "button" for the main pill-style trigger, "link" for an inline text link
    * (e.g. a version-history row), "icon" for a compact row-level quick action. */
   variant?: "button" | "link" | "icon";
+  /** Hides the browser's built-in PDF toolbar / video controls' download
+   * option — set by callers previewing a version this viewer isn't allowed
+   * to actually download (app/api/documents/[id]/download/route.ts's own
+   * "user" role + current-version-only restriction; without this, the
+   * native PDF viewer's own download button would silently give it away
+   * anyway, since it saves whatever's already loaded in the iframe rather
+   * than making a new request our API could reject). Same caveat as the
+   * public share page's identical trick (app/share/[token]/page.tsx): a
+   * UI hint, not real DRM — the bytes are still in the loaded iframe/video
+   * for a technical user to get another way. */
+  restrictToolbar?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -116,9 +128,23 @@ export default function DocumentPreview({
                   title="Document preview"
                 />
               ) : docType === "pdf" || hasPreviewPdf ? (
-                <iframe src={previewUrl} className={maximized ? "h-full w-full" : "h-[75vh] w-full"} title="Document preview" />
+                // key forces a fresh load (and zoom=page-fit re-fits it) on
+                // every maximize/minimize toggle — the browser's built-in
+                // PDF viewer otherwise keeps whatever zoom it had from the
+                // previous frame size instead of refitting to the new one.
+                <iframe
+                  key={String(maximized)}
+                  src={`${previewUrl}#zoom=page-fit${restrictToolbar ? "&toolbar=0" : ""}`}
+                  className={maximized ? "h-full w-full" : "h-[75vh] w-full"}
+                  title="Document preview"
+                />
               ) : docType === "video" ? (
-                <video controls className={`w-full bg-black ${maximized ? "h-full" : "max-h-[75vh]"}`} src={previewUrl} />
+                <video
+                  controls
+                  controlsList={restrictToolbar ? "nodownload" : undefined}
+                  className={`w-full bg-black ${maximized ? "h-full" : "max-h-[75vh]"}`}
+                  src={previewUrl}
+                />
               ) : docType === "ppt" ? (
                 <PptxSlideViewer documentId={documentId} version={version} />
               ) : docType === "excel" ? (

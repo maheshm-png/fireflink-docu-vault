@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import BrandedLoader from "./BrandedLoader";
 
 type TextRun = { text: string; bold: boolean; italic: boolean; underline: boolean; sizePt?: number; color?: string };
@@ -23,13 +23,33 @@ const ALIGN_MAP: Record<string, "left" | "center" | "right" | "justify"> = {
 // on the run itself, which this parser deliberately doesn't chase down.
 const DEFAULT_RUN_PT = 18;
 
-export default function PptxSlideViewer({ documentId, version }: { documentId: string; version?: number }) {
+export default function PptxSlideViewer({
+  documentId,
+  version,
+  // Overrides the default authenticated fetch URL below — used by the
+  // public share page (app/share/[token]/page.tsx) to point at
+  // /api/share/[token]/pptx-preview instead. Omit for the normal
+  // logged-in-user behavior; nothing else about this component changes
+  // when it's not passed.
+  fetchUrl,
+  // Adds a fullscreen "slideshow" toggle — off by default so the existing
+  // preview-modal usage (DocumentPreview.tsx) is unchanged unless a caller
+  // opts in.
+  allowFullscreen = false,
+}: {
+  documentId: string;
+  version?: number;
+  fetchUrl?: string;
+  allowFullscreen?: boolean;
+}) {
   const [deck, setDeck] = useState<SlideDeck | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const url = `/api/documents/${documentId}/pptx-preview${version ? `?version=${version}` : ""}`;
+    const url = fetchUrl ?? `/api/documents/${documentId}/pptx-preview${version ? `?version=${version}` : ""}`;
     setDeck(null);
     setError(null);
     setIndex(0);
@@ -40,7 +60,28 @@ export default function PptxSlideViewer({ documentId, version }: { documentId: s
       })
       .then(setDeck)
       .catch(() => setError("Could not render slides for this presentation — try downloading it instead."));
-  }, [documentId, version]);
+  }, [documentId, version, fetchUrl]);
+
+  // Tracks fullscreen state via the browser's own change event (not just
+  // our toggle button) so pressing Esc to exit fullscreen — the normal way
+  // — still updates the button's icon/label correctly.
+  useEffect(() => {
+    if (!allowFullscreen) return;
+    function onFullscreenChange() {
+      setFullscreen(Boolean(document.fullscreenElement));
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [allowFullscreen]);
+
+  function toggleFullscreen() {
+    if (!stageRef.current) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      stageRef.current.requestFullscreen().catch(() => {});
+    }
+  }
 
   // Left/right arrow keys jump slides — safe to listen globally while this
   // viewer is mounted since it only ever appears inside the preview modal,
@@ -84,59 +125,93 @@ export default function PptxSlideViewer({ documentId, version }: { documentId: s
   const slideWidthPt = deck.width / 12700;
   const fontSizeCqw = (sizePt: number | undefined) => ((sizePt ?? DEFAULT_RUN_PT) / slideWidthPt) * 100;
 
+  const slideBox = (
+    <div
+      className="relative w-full overflow-hidden bg-white"
+      style={{ aspectRatio: `${deck.width} / ${deck.height}`, containerType: "inline-size" } as React.CSSProperties}
+    >
+      {slide.shapes.map((shape, i) => {
+        const posStyle: React.CSSProperties = {
+          position: "absolute",
+          left: `${(shape.x / deck.width) * 100}%`,
+          top: `${(shape.y / deck.height) * 100}%`,
+          width: `${(shape.w / deck.width) * 100}%`,
+          height: `${(shape.h / deck.height) * 100}%`,
+        };
+        if (shape.type === "image") {
+          // eslint-disable-next-line @next/next/no-img-element -- data: URI, not a remote/optimizable src
+          return <img key={i} src={shape.dataUrl} alt="" style={posStyle} className="object-contain" />;
+        }
+        return (
+          <div
+            key={i}
+            style={{ ...posStyle, backgroundColor: shape.fill, padding: "1cqw" }}
+            className="overflow-hidden text-ff-text"
+          >
+            {shape.paragraphs.map((para, pi) => (
+              <p
+                key={pi}
+                style={{ textAlign: para.align ? ALIGN_MAP[para.align] : undefined, margin: 0 }}
+                className="whitespace-pre-wrap break-words leading-snug"
+              >
+                {para.bullet && <span aria-hidden="true">&bull;&nbsp;</span>}
+                {para.runs.map((run, ri) => (
+                  <span
+                    key={ri}
+                    style={{
+                      fontWeight: run.bold ? 700 : 400,
+                      fontStyle: run.italic ? "italic" : "normal",
+                      textDecoration: run.underline ? "underline" : "none",
+                      color: run.color,
+                      fontSize: `${fontSizeCqw(run.sizePt)}cqw`,
+                    }}
+                  >
+                    {run.text}
+                  </span>
+                ))}
+              </p>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="flex flex-col items-center gap-3 p-4">
+      {/* In fullscreen, this outer box IS the browser's fullscreen element
+          (see toggleFullscreen) — it just centers slideBox at whatever size
+          fits the screen while slideBox itself keeps the deck's real aspect
+          ratio, rather than being stretched to fill the whole rectangle. */}
       <div
-        className="relative w-full max-w-3xl overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff"
-        style={{ aspectRatio: `${deck.width} / ${deck.height}`, containerType: "inline-size" } as React.CSSProperties}
+        ref={stageRef}
+        className={
+          fullscreen
+            ? "flex h-screen w-screen items-center justify-center bg-black"
+            : "w-full max-w-3xl rounded-ff border border-ff-border shadow-ff"
+        }
       >
-        {slide.shapes.map((shape, i) => {
-          const posStyle: React.CSSProperties = {
-            position: "absolute",
-            left: `${(shape.x / deck.width) * 100}%`,
-            top: `${(shape.y / deck.height) * 100}%`,
-            width: `${(shape.w / deck.width) * 100}%`,
-            height: `${(shape.h / deck.height) * 100}%`,
-          };
-          if (shape.type === "image") {
-            // eslint-disable-next-line @next/next/no-img-element -- data: URI, not a remote/optimizable src
-            return <img key={i} src={shape.dataUrl} alt="" style={posStyle} className="object-contain" />;
-          }
-          return (
-            <div
-              key={i}
-              style={{ ...posStyle, backgroundColor: shape.fill, padding: "1cqw" }}
-              className="overflow-hidden text-ff-text"
-            >
-              {shape.paragraphs.map((para, pi) => (
-                <p
-                  key={pi}
-                  style={{ textAlign: para.align ? ALIGN_MAP[para.align] : undefined, margin: 0 }}
-                  className="whitespace-pre-wrap break-words leading-snug"
-                >
-                  {para.bullet && <span aria-hidden="true">&bull;&nbsp;</span>}
-                  {para.runs.map((run, ri) => (
-                    <span
-                      key={ri}
-                      style={{
-                        fontWeight: run.bold ? 700 : 400,
-                        fontStyle: run.italic ? "italic" : "normal",
-                        textDecoration: run.underline ? "underline" : "none",
-                        color: run.color,
-                        fontSize: `${fontSizeCqw(run.sizePt)}cqw`,
-                      }}
-                    >
-                      {run.text}
-                    </span>
-                  ))}
-                </p>
-              ))}
-            </div>
-          );
-        })}
+        {fullscreen ? (
+          <div style={{ aspectRatio: `${deck.width} / ${deck.height}`, maxHeight: "100vh", maxWidth: "100vw", width: "100%" }}>
+            {slideBox}
+          </div>
+        ) : (
+          slideBox
+        )}
       </div>
 
       <div className="flex items-center gap-3 text-sm text-ff-textMuted">
+        {allowFullscreen && (
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={fullscreen ? "Exit slideshow" : "Slideshow"}
+            aria-label={fullscreen ? "Exit slideshow" : "Slideshow"}
+            className="rounded p-1.5 hover:bg-ff-lavender"
+          >
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setIndex((i) => Math.max(0, i - 1))}

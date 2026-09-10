@@ -50,6 +50,11 @@ enum ReviewStatus {
   rejected
 }
 
+enum ShareAccessLevel {
+  view          // can view/preview only
+  view_download // can also download the original file
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -88,6 +93,9 @@ model User {
   notifications       Notification[]
   categoriesCreated   Category[]
   announcementsPosted Announcement[]
+  shareLinksCreated   ShareLink[]
+  inlineCommentsAuthored InlineComment[]
+  feedbackAuthored    DocumentFeedback[]
 }
 
 // Admin-managed job-title options for User.designation (app/admin/
@@ -167,6 +175,9 @@ model Document {
   reviewRequests   ReviewRequest[]
   stalenessFlags   StalenessFlag[]
   events           DocumentEvent[]
+  shareLink        ShareLink?
+  inlineComments   InlineComment[]
+  feedback         DocumentFeedback[]
 
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -186,6 +197,16 @@ model Document {
   // For documents that are simply always current by nature (legal terms,
   // brand guidelines) and shouldn't cycle through re-review at all.
   neverExpires     Boolean    @default(false)
+
+  // Whether any authenticated user (not just an assigned reviewer) can leave
+  // highlight-and-comment feedback on this document (components/
+  // DocumentFeedback.tsx) once it's published. Decided by the approving
+  // manager at the moment they publish it — see the "allowFeedback" radio in
+  // ReviewActions.tsx, alongside the existing announceToAll one — not
+  // editable afterward outside of a fresh publish. Defaults closed so a
+  // document never unexpectedly starts collecting feedback nobody opted
+  // into.
+  feedbackEnabled  Boolean    @default(false)
 
   // Why a manager pulled this back down — required at revoke time (see
   // app/api/documents/[id]/revoke/route.ts and RevokeButton.tsx), shown
@@ -260,6 +281,8 @@ model ReviewRequest {
   // requesting a second/third opinion bumps to a new round with the newly
   // added reviewer(s), while earlier rounds' rows are untouched history.
   roundNumber Int          @default(1)
+
+  inlineComments InlineComment[]
 
   @@index([documentId, status])
 }
@@ -355,4 +378,92 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+}
+
+// Public, unauthenticated "anyone with the link" sharing — components/
+// ShareModal.tsx, app/share/[token]/page.tsx. One share config per document
+// (documentId is unique): opening the share dialog again updates the same
+// link's access level/expiry rather than issuing a new token, so a link
+// already handed out keeps working (with whatever the current settings are)
+// until it's explicitly stopped or it expires. expiresAt is null for a
+// "No expiry" link — every reader of it (this file's own comment aside)
+// must treat null as "never expires", not as an unset/invalid value.
+model ShareLink {
+  id          String           @id @default(uuid())
+  token       String           @unique @default(uuid())
+  document    Document         @relation(fields: [documentId], references: [id])
+  documentId  String           @unique
+  accessLevel ShareAccessLevel
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  expiresAt   DateTime?
+
+  @@index([token])
+}
+
+// A reviewer's comment tied to a specific selected passage of the
+// document's extracted text (components/InlineCommentReview.tsx) — separate
+// from ReviewRequest.comments (the single decision-time feedback box, which
+// this doesn't replace, only supplements). Scoped to the specific
+// ReviewRequest (round) it was added under, not just the document, so
+// app/api/documents/[id]/review/route.ts can bundle exactly "this round's"
+// comments into the GChat/email decision notice without pulling in an
+// earlier round's already-sent ones.
+model InlineComment {
+  id              String        @id @default(uuid())
+  document        Document      @relation(fields: [documentId], references: [id])
+  documentId      String
+  reviewRequest   ReviewRequest @relation(fields: [reviewRequestId], references: [id])
+  reviewRequestId String
+  reviewer        User          @relation(fields: [reviewerId], references: [id])
+  reviewerId      String
+  // The selected snippet itself, not a character offset/range — resilient
+  // to the surrounding text differing slightly across renders/versions,
+  // and simple to just re-display verbatim (quoted) wherever this comment
+  // is shown, rather than needing to re-anchor a position. Null for a
+  // document with nothing extracted to highlight (an external link, a
+  // video) — components/HighlightCommentPanel.tsx falls back to a plain,
+  // unanchored comment box in that case rather than the feature just not
+  // being available.
+  highlightedText String?
+  comment         String
+  createdAt       DateTime      @default(now())
+  // Set when the reviewer edits their own comment text after adding it
+  // (components/HighlightCommentPanel.tsx / PdfHighlightViewer.tsx's Edit
+  // action) — null means never edited. Shown as "(edited)" wherever this
+  // comment is displayed, so a viewer isn't misled into thinking the
+  // original text is still exactly what was first written.
+  editedAt        DateTime?
+
+  @@index([reviewRequestId])
+  @@index([documentId])
+}
+
+// Open feedback from ANY authenticated user (not just an assigned
+// reviewer) on a PUBLISHED document — components/DocumentFeedback.tsx,
+// using the same highlight-and-comment UX as InlineComment above (shared
+// via components/HighlightCommentPanel.tsx) but deliberately a separate
+// model: this isn't tied to a review round, has no batched-into-a-decision-
+// notice semantics, and is only ever collected when the publishing manager
+// opted in (Document.feedbackEnabled) rather than being available by
+// default. highlightedText is null for a document with nothing extracted
+// to highlight, same fallback as InlineComment.
+model DocumentFeedback {
+  id              String   @id @default(uuid())
+  document        Document @relation(fields: [documentId], references: [id])
+  documentId      String
+  user            User     @relation(fields: [userId], references: [id])
+  userId          String
+  highlightedText String?
+  comment         String
+  createdAt       DateTime @default(now())
+  // Set when the comment's author or a moderating manager/superadmin edits
+  // its text after it was added — null means never edited. See
+  // InlineComment.editedAt's own comment for why this is tracked rather
+  // than silently overwriting.
+  editedAt        DateTime?
+
+  @@index([documentId])
 }

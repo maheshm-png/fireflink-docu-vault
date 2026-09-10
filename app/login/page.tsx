@@ -13,6 +13,35 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// Opens Gmail's web compose window pre-filled for an access request —
+// accounts here are admin-created, not self-serve signup, so this is just
+// a shortcut that fills in the recipient/subject/body someone would
+// otherwise have to type themselves. A plain mailto: link would do the
+// same for whatever the OS's default mail client is, but this app's users
+// are on Google Workspace (fireflink.com), so Gmail's own compose URL is
+// the more useful default: it opens in a new tab rather than potentially
+// doing nothing if there's no configured desktop mail client at all.
+// Note: Gmail's compose URL only accepts a plain text body, so a default
+// font (Verdana or otherwise) can't be set through this link; that's only
+// ever a per message choice from Gmail's own compose toolbar.
+const SIGNUP_MAILTO_BODY = [
+  "Hello Vault Admin,",
+  "",
+  "I would like to request access to the FireFlink Docu Vault. Please find my details below for your reference.",
+  "",
+  "• Name: ",
+  "• Role: ",
+  "• FireFlink Email: ",
+  "• Team: ",
+  "",
+  "Thank you for your time and consideration.",
+  "",
+  "Regards,",
+].join("\n");
+const SIGNUP_MAILTO_URL = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+  "docuvault@fireflink.com"
+)}&su=${encodeURIComponent("FireFlink Docu Vault Access Request")}&body=${encodeURIComponent(SIGNUP_MAILTO_BODY)}`;
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -89,7 +118,7 @@ export default function LoginPage() {
 
         <div className="relative z-10">
           <p className="text-xs text-white/50">Copyright © FireFlink Pvt Ltd. All Rights Reserved</p>
-          <p className="mt-1 text-xs text-white/40">Contributed by Presales Demo Team</p>
+          <p className="mt-1 text-xs text-white/40">Contributed by the Demo &amp; Presales Team</p>
         </div>
       </div>
 
@@ -162,8 +191,16 @@ export default function LoginPage() {
               </form>
 
               <p className="mt-6 text-center text-xs text-ff-textMuted">
-                Accounts are created by your FireFlink Docu Vault admin. Contact your superadmin for
-                access.
+                For account access, please{" "}
+                <a
+                  href={SIGNUP_MAILTO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-bold text-ff-accent transition-colors hover:text-ff-accentHover"
+                >
+                  Click Here
+                </a>
+                .
               </p>
             </>
           ) : (

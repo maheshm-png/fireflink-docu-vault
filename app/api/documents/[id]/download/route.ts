@@ -73,6 +73,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
+  // The base view-only "user" role only ever gets the current version —
+  // older versions are a contributor/manager-tier concern (comparing
+  // changes, auditing what an earlier reviewer approved), not something a
+  // view-only reader needs. Enforced here (not just by omitting the UI
+  // control) since ?version= is a plain query param anyone could add by
+  // hand.
+  if (user.role === "user" && document.currentVersionId !== version.id) {
+    return NextResponse.json({ error: "Only the current version is available to download." }, { status: 403 });
+  }
+
   if (format === "pdf") {
     if (!version.previewPdfPath) {
       return NextResponse.json({ error: "No PDF version is available for this file." }, { status: 400 });

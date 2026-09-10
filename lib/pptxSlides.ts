@@ -102,7 +102,7 @@ export function extractPptxSlides(buffer: Buffer): SlideDeck {
     const sld = firstTagValue(ordered, "p:sld");
     const cSld = sld ? firstTagValue(sld, "p:cSld") : undefined;
     const spTree = cSld ? firstTagValue(cSld, "p:spTree") : undefined;
-    if (spTree) collectShapes(spTree, shapes, relMap, zip);
+    if (spTree) collectShapes(spTree, shapes, relMap, zip, IDENTITY_TRANSFORM);
     return { shapes };
   });
 
@@ -121,13 +121,44 @@ function nodeAttrs(node: PONode): Record<string, string> {
   return node[":@"] ?? {};
 }
 
-function collectShapes(nodes: PONode[], shapes: SlideShape[], relMap: Map<string, string>, zip: AdmZip) {
+// A shape's own <a:xfrm> off/ext is expressed in its IMMEDIATE parent's
+// coordinate space — for a top-level shape that parent is the slide itself
+// (EMUs, 0..deck.width/height), but for a shape inside a <p:grpSp> it's the
+// group's own local child coordinate space (<a:chOff>/<a:chExt> on the
+// group's <a:xfrm>), which must be mapped through the group's own
+// off/ext/chOff/chExt transform — recursively, for nested groups — to reach
+// real slide-absolute coordinates. Skipping this (as an earlier version of
+// this file did) is exactly why a grouped diagram (boxes/arrows/labels,
+// extremely common for anything drawn as a flowchart) rendered with every
+// shape in the wrong place: their raw group-local coordinates were used
+// as-is, so the group's own position/scale never got applied.
+type Transform = (x: number, y: number, w: number, h: number) => { x: number; y: number; w: number; h: number };
+
+const IDENTITY_TRANSFORM: Transform = (x, y, w, h) => ({ x, y, w, h });
+
+function composeGroupTransform(
+  outer: Transform,
+  group: { offX: number; offY: number; extW: number; extH: number; chOffX: number; chOffY: number; chExtW: number; chExtH: number }
+): Transform {
+  const scaleX = group.chExtW ? group.extW / group.chExtW : 1;
+  const scaleY = group.chExtH ? group.extH / group.chExtH : 1;
+  return (x, y, w, h) =>
+    outer(
+      group.offX + (x - group.chOffX) * scaleX,
+      group.offY + (y - group.chOffY) * scaleY,
+      w * scaleX,
+      h * scaleY
+    );
+}
+
+function collectShapes(nodes: PONode[], shapes: SlideShape[], relMap: Map<string, string>, zip: AdmZip, transform: Transform) {
   for (const node of nodes) {
     if ("p:sp" in node) {
       const children = node["p:sp"] as PONode[];
       const spPr = firstTagValue(children, "p:spPr");
-      const { x, y, w, h } = readXfrm(spPr ? firstTagValue(spPr, "a:xfrm") : undefined);
-      if (w === 0 || h === 0) continue; // no explicit position — inherited from layout, skip rather than guess
+      const local = readXfrm(spPr ? firstTagValue(spPr, "a:xfrm") : undefined);
+      if (local.w === 0 || local.h === 0) continue; // no explicit position — inherited from layout, skip rather than guess
+      const { x, y, w, h } = transform(local.x, local.y, local.w, local.h);
       const txBody = firstTagValue(children, "p:txBody");
       const paragraphs = txBody ? collectParagraphs(txBody) : [];
       const hasText = paragraphs.some((p) => p.runs.some((r) => r.text.trim()));
@@ -137,8 +168,9 @@ function collectShapes(nodes: PONode[], shapes: SlideShape[], relMap: Map<string
     } else if ("p:pic" in node) {
       const children = node["p:pic"] as PONode[];
       const spPr = firstTagValue(children, "p:spPr");
-      const { x, y, w, h } = readXfrm(spPr ? firstTagValue(spPr, "a:xfrm") : undefined);
-      if (w === 0 || h === 0) continue;
+      const local = readXfrm(spPr ? firstTagValue(spPr, "a:xfrm") : undefined);
+      if (local.w === 0 || local.h === 0) continue;
+      const { x, y, w, h } = transform(local.x, local.y, local.w, local.h);
       const blipFill = firstTagValue(children, "p:blipFill");
       const blipNode = blipFill?.find((n) => "a:blip" in n);
       const embedId = blipNode ? nodeAttrs(blipNode)["@_r:embed"] : undefined;
@@ -152,7 +184,16 @@ function collectShapes(nodes: PONode[], shapes: SlideShape[], relMap: Map<string
       const dataUrl = `data:${mime};base64,${mediaEntry.getData().toString("base64")}`;
       shapes.push({ type: "image", x, y, w, h, dataUrl });
     } else if ("p:grpSp" in node) {
-      collectShapes(node["p:grpSp"] as PONode[], shapes, relMap, zip);
+      const children = node["p:grpSp"] as PONode[];
+      const grpSpPr = firstTagValue(children, "p:grpSpPr");
+      const groupXfrm = grpSpPr ? firstTagValue(grpSpPr, "a:xfrm") : undefined;
+      const group = readGroupXfrm(groupXfrm);
+      // A group with a degenerate child-space (chExt 0 on either axis, or no
+      // xfrm at all) can't be transformed meaningfully — skip its contents
+      // rather than plot them at a nonsensical scale.
+      if (!group) continue;
+      const nestedTransform = composeGroupTransform(transform, group);
+      collectShapes(children, shapes, relMap, zip, nestedTransform);
     }
   }
 }
@@ -168,6 +209,37 @@ function readXfrm(xfrm?: PONode[]) {
     y: parseInt(offAttrs["@_y"], 10) || 0,
     w: parseInt(extAttrs["@_cx"], 10) || 0,
     h: parseInt(extAttrs["@_cy"], 10) || 0,
+  };
+}
+
+/** Reads a group shape's own <a:xfrm> — off/ext (its position/size in the
+ * PARENT coordinate space) AND chOff/chExt (the coordinate space its
+ * children's own xfrm values are expressed in) — returning null when
+ * either is missing/degenerate, since there's then no sound way to place
+ * its children. */
+function readGroupXfrm(xfrm?: PONode[]) {
+  if (!xfrm) return null;
+  const offNode = xfrm.find((n) => "a:off" in n);
+  const extNode = xfrm.find((n) => "a:ext" in n);
+  const chOffNode = xfrm.find((n) => "a:chOff" in n);
+  const chExtNode = xfrm.find((n) => "a:chExt" in n);
+  if (!offNode || !extNode || !chOffNode || !chExtNode) return null;
+  const offAttrs = nodeAttrs(offNode);
+  const extAttrs = nodeAttrs(extNode);
+  const chOffAttrs = nodeAttrs(chOffNode);
+  const chExtAttrs = nodeAttrs(chExtNode);
+  const extW = parseInt(extAttrs["@_cx"], 10) || 0;
+  const extH = parseInt(extAttrs["@_cy"], 10) || 0;
+  if (extW === 0 || extH === 0) return null;
+  return {
+    offX: parseInt(offAttrs["@_x"], 10) || 0,
+    offY: parseInt(offAttrs["@_y"], 10) || 0,
+    extW,
+    extH,
+    chOffX: parseInt(chOffAttrs["@_x"], 10) || 0,
+    chOffY: parseInt(chOffAttrs["@_y"], 10) || 0,
+    chExtW: parseInt(chExtAttrs["@_cx"], 10) || 0,
+    chExtH: parseInt(chExtAttrs["@_cy"], 10) || 0,
   };
 }
 

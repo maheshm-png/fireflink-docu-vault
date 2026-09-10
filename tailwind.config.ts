@@ -42,6 +42,14 @@ const config: Config = {
         "ff-accent-gradient": "linear-gradient(135deg, #8E2E7A 0%, #A6398F 100%)",
         "ff-plum-gradient": "linear-gradient(180deg, #29102D 0%, #1B0A1E 100%)",
         "ff-surface-gradient": "linear-gradient(160deg, #FFFFFF 0%, #FBF5FA 100%)",
+        // Same "lighten toward the hover shade" formula as ff-accent-gradient,
+        // for every other semantic/status color — status pills, badges, and
+        // stepper dots (app/dashboard/documents/[id]/ReviewTrail.tsx,
+        // DocumentDetailTabs.tsx) instead of a flat fill.
+        "ff-success-gradient": "linear-gradient(135deg, #2F9E44 0%, #45B85C 100%)",
+        "ff-warning-gradient": "linear-gradient(135deg, #C9861A 0%, #E0A230 100%)",
+        "ff-danger-gradient": "linear-gradient(135deg, #C23B3B 0%, #D95C5C 100%)",
+        "ff-lavender-gradient": "linear-gradient(135deg, #F6ECF4 0%, #EEDCEB 100%)",
       },
     },
   },

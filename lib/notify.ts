@@ -22,7 +22,12 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
  */
 
 // Tells the whole team a submission was approved or rejected — carries the
-// reviewer's comments (required on reject, see ReviewActions.tsx).
+// reviewer's comments (required on reject, see ReviewActions.tsx), plus any
+// inline (highlight-and-comment) feedback left during this same review
+// round — see components/InlineCommentReview.tsx and
+// app/api/documents/[id]/review/route.ts, which fetches that round's
+// InlineComment rows and passes them here. Deliberately batched into this
+// one decision-time notice rather than sent as they're added.
 export async function notifyReviewDecision(params: {
   uploaderName: string;
   uploaderEmail: string;
@@ -30,17 +35,37 @@ export async function notifyReviewDecision(params: {
   documentId: string;
   decision: "approved" | "rejected";
   comments?: string;
+  inlineComments?: { highlightedText: string | null; comment: string }[];
 }) {
   const verb = params.decision === "approved" ? "was approved and is now live" : "was sent back with feedback";
   const lines = [
     `${params.uploaderName}'s submission "${params.documentTitle}" ${verb}.`,
   ];
   if (params.comments) lines.push(`Reviewer comments: ${params.comments}`);
+  if (params.inlineComments && params.inlineComments.length > 0) {
+    lines.push("", "Inline comments:");
+    lines.push(
+      ...params.inlineComments.map((c) =>
+        c.highlightedText ? `- On "${c.highlightedText}": ${c.comment}` : `- ${c.comment}`
+      )
+    );
+  }
   lines.push(`View: ${APP_URL}/dashboard/documents/${params.documentId}`);
   await notifyGChat(lines.join("\n"));
 
   const decisionText =
     params.decision === "approved" ? "has been approved and is now published" : "has been returned for revision";
+  const inlineCommentsHtml =
+    params.inlineComments && params.inlineComments.length > 0
+      ? `
+        <p><strong>Inline Comments:</strong></p>
+        <ul>
+          ${params.inlineComments
+            .map((c) => (c.highlightedText ? `<li>On "${c.highlightedText}": ${c.comment}</li>` : `<li>${c.comment}</li>`))
+            .join("")}
+        </ul>
+      `
+      : "";
   await sendEmail({
     to: params.uploaderEmail,
     subject: `Document ${params.decision}: ${params.documentTitle}`,
@@ -48,6 +73,7 @@ export async function notifyReviewDecision(params: {
       <p>Dear ${params.uploaderName},</p>
       <p>Your submission, "<strong>${params.documentTitle}</strong>," ${decisionText}.</p>
       ${params.comments ? `<p><strong>Reviewer Comments:</strong> ${params.comments}</p>` : ""}
+      ${inlineCommentsHtml}
       <p>You may view the document using the link below.</p>
       <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Document</a></p>
     `,

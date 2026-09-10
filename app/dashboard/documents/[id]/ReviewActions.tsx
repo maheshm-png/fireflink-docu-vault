@@ -41,6 +41,7 @@ export default function ReviewActions({
   const [comments, setComments] = useState("");
   const [versionId, setVersionId] = useState(versions[0]?.id);
   const [announce, setAnnounce] = useState<"yes" | "no" | null>(null);
+  const [allowFeedback, setAllowFeedback] = useState<"yes" | "no" | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentsError, setCommentsError] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -74,7 +75,9 @@ export default function ReviewActions({
         action: "decide",
         decision,
         comments,
-        ...(decision === "approved" ? { announceToAll: willPublish && announce === "yes", versionId } : {}),
+        ...(decision === "approved"
+          ? { announceToAll: willPublish && announce === "yes", allowFeedback: willPublish && allowFeedback === "yes", versionId }
+          : {}),
       }),
     });
     setBusy(false);
@@ -207,21 +210,50 @@ export default function ReviewActions({
           )}
 
           {willPublish ? (
-            <fieldset className="mb-4 rounded-ff border border-ff-border p-3">
-              <legend className="px-1 text-xs font-medium text-ff-text">
-                Send a &quot;new document published&quot; notification to all users? <span className="text-ff-danger">*</span>
-              </legend>
-              <div className="mt-1 flex gap-4 text-sm">
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" name="announce" required checked={announce === "yes"} onChange={() => setAnnounce("yes")} />
-                  Yes, announce it
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" name="announce" required checked={announce === "no"} onChange={() => setAnnounce("no")} />
-                  No, publish quietly
-                </label>
-              </div>
-            </fieldset>
+            <>
+              <fieldset className="mb-4 rounded-ff border border-ff-border p-3">
+                <legend className="px-1 text-xs font-medium text-ff-text">
+                  Send a &quot;new document published&quot; notification to all users? <span className="text-ff-danger">*</span>
+                </legend>
+                <div className="mt-1 flex gap-4 text-sm">
+                  <label className="flex items-center gap-1.5">
+                    <input type="radio" name="announce" required checked={announce === "yes"} onChange={() => setAnnounce("yes")} />
+                    Yes, announce it
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input type="radio" name="announce" required checked={announce === "no"} onChange={() => setAnnounce("no")} />
+                    No, publish quietly
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset className="mb-4 rounded-ff border border-ff-border p-3">
+                <legend className="px-1 text-xs font-medium text-ff-text">
+                  Allow any user to leave feedback on this document? <span className="text-ff-danger">*</span>
+                </legend>
+                <div className="mt-1 flex gap-4 text-sm">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="allowFeedback"
+                      required
+                      checked={allowFeedback === "yes"}
+                      onChange={() => setAllowFeedback("yes")}
+                    />
+                    Yes, accept feedback
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="allowFeedback"
+                      required
+                      checked={allowFeedback === "no"}
+                      onChange={() => setAllowFeedback("no")}
+                    />
+                    No
+                  </label>
+                </div>
+              </fieldset>
+            </>
           ) : (
             <p className="mb-4 text-xs text-ff-textMuted">
               {otherPendingReviewers} other reviewer{otherPendingReviewers === 1 ? "" : "s"} still need
@@ -231,9 +263,13 @@ export default function ReviewActions({
 
           <div className="flex items-center gap-2">
             <button
-              disabled={busy || (willPublish && announce === null)}
+              disabled={busy || (willPublish && (announce === null || allowFeedback === null))}
               onClick={() => decide("approved")}
-              title={willPublish && announce === null ? "Choose whether to announce this publish first" : undefined}
+              title={
+                willPublish && (announce === null || allowFeedback === null)
+                  ? "Answer both questions above first"
+                  : undefined
+              }
               className="flex items-center justify-center rounded-ff bg-ff-success px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? <BrandedLoader size={16} variant="white" /> : willPublish ? "Approve & Publish" : "Approve"}
@@ -245,8 +281,8 @@ export default function ReviewActions({
             >
               {busy ? <BrandedLoader size={16} variant="white" /> : "Reject"}
             </button>
-            {willPublish && announce === null && (
-              <span className="text-xs text-ff-textMuted">Pick Yes or No above to enable Approve.</span>
+            {willPublish && (announce === null || allowFeedback === null) && (
+              <span className="text-xs text-ff-textMuted">Answer both questions above to enable Approve.</span>
             )}
           </div>
         </>

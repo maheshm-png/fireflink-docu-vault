@@ -49,10 +49,16 @@ async function purgeExpiredDeletedDocuments(retentionDays: number) {
 
     // Children first (all FKs to Document are RESTRICT, not CASCADE), parent
     // last, one transaction — same shape as the original hard-delete route.
+    // inlineComment must come before reviewRequest — InlineComment also has
+    // a RESTRICT FK into ReviewRequest, so any left over would block that
+    // delete too, not just the final document.delete.
     await prisma.$transaction([
       prisma.document.update({ where: { id: doc.id }, data: { currentVersionId: null } }),
       prisma.documentEvent.deleteMany({ where: { documentId: doc.id } }),
       prisma.stalenessFlag.deleteMany({ where: { documentId: doc.id } }),
+      prisma.inlineComment.deleteMany({ where: { documentId: doc.id } }),
+      prisma.documentFeedback.deleteMany({ where: { documentId: doc.id } }),
+      prisma.shareLink.deleteMany({ where: { documentId: doc.id } }),
       prisma.reviewRequest.deleteMany({ where: { documentId: doc.id } }),
       prisma.documentVersion.deleteMany({ where: { documentId: doc.id } }),
       prisma.document.delete({ where: { id: doc.id } }),
