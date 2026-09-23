@@ -944,14 +944,14 @@ export default async function DocumentDetailPage({
             )}
         </div>
 
-        {/* Metadata line: who owns/uploaded it, plus every static fact —
+        {/* Metadata line: who uploaded it and who's reviewing it, plus every static fact —
             category, permanent-flag or review-due, purge countdown — and,
             for a non-stakeholder, the public-safe Review History lookup.
             Same muted weight throughout, none of it competing with the
             title above. */}
         <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ff-textMuted">
           <span className="flex min-w-0 flex-wrap items-center gap-2 break-words">
-            Owned by {document.owner.name} · Uploaded by {document.uploadedBy.name}
+            Uploaded by {document.uploadedBy.name} · Reviewer: {document.owner.name}
             {canManageLifecycle && !isDeleted && document.status === "published" && effectiveCurrentVersion && (
               <CurrentVersionControl
                 documentId={document.id}
