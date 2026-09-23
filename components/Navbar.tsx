@@ -5,7 +5,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Home, Files, LayoutDashboard, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
-  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound,
+  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
@@ -162,6 +162,7 @@ export default function Navbar({
 
   const helpItems: NavItem[] = [
     { href: "/dashboard/assistant", label: "Ask Docu AI", icon: Sparkles },
+    { href: "/dashboard/help", label: "Roles & Features", icon: BookOpenText },
   ];
 
   const controlsItems: NavItem[] = [
