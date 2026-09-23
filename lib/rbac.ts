@@ -14,6 +14,23 @@ export const ROLE_LABELS: Record<Role, string> = {
   user: "User",
 };
 
+/** Plain-English explanation of what each role can and cannot do, shown
+ * anywhere a role reaches a person (the Navbar's profile dropdown, the
+ * Manage Users role picker, the invite form). Kept here, next to
+ * ROLE_LABELS, as the one place this ever gets written down — every other
+ * UI surface imports from here instead of keeping its own copy, since a
+ * second copy is how the invite form's version drifted out of date. Call
+ * out the Superadmin carve-out explicitly wherever this is shown: it's the
+ * single most surprising rule in the app, and nothing else states it. */
+export const ROLE_DESCRIPTIONS: Record<Role, string> = {
+  superadmin:
+    "Full administrative access: manage users and their roles, categories, settings, and announcements. Cannot approve, reject, or delete documents; that stays with Manager on purpose.",
+  manager:
+    "Full document control: upload, edit, approve or reject reviews, delete, archive, revoke, and restore documents. Also manages categories, settings, and announcements.",
+  contributor: "Can upload documents and edit their own uploads. Cannot approve reviews or delete documents.",
+  user: "View-only access to published documents.",
+};
+
 export const PERMISSIONS = {
   viewPublished: ["superadmin", "manager", "contributor", "user"],
   upload: ["superadmin", "manager", "contributor"],
@@ -53,6 +70,9 @@ export const PERMISSIONS = {
   // same tier as manageUsers since it's really a sub-concern of user
   // management (what designation a user can be assigned).
   manageDesignations: ["superadmin"],
+  // The admin-managed team option list (app/admin/teams) — same tier and
+  // same reasoning as manageDesignations above.
+  manageTeams: ["superadmin"],
   viewAuditLog: ["superadmin", "manager"],
 } as const;
 

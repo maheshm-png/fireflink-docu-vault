@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
+import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
 import Logo from "@/components/Logo";
+import PlumWatermark from "@/components/PlumWatermark";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
 
@@ -50,11 +52,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [forgotMode, setForgotMode] = useState(false);
-  const [resetEmail, setResetEmail] = useState("");
-  const [resetStatus, setResetStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [resetErrorMessage, setResetErrorMessage] = useState<string | null>(null);
-
   // Brief branded intro on first landing on the login screen — logo animates
   // in, holds, then fades to reveal the sign-in form underneath (which is
   // already mounted the whole time, so there's no layout shift on handoff).
@@ -81,26 +78,12 @@ export default function LoginPage() {
     router.push("/dashboard/home");
   }
 
-  async function handleResetRequest(e: React.FormEvent) {
-    e.preventDefault();
-    setResetStatus("sending");
-    setResetErrorMessage(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (error) {
-      setResetErrorMessage(error.message);
-      setResetStatus("error");
-      return;
-    }
-    setResetStatus("sent");
-  }
-
   return (
     <div className="flex min-h-screen">
       {/* Left: brand panel */}
       <div className="relative hidden w-[55%] flex-col justify-between overflow-hidden bg-ff-plum-gradient px-14 py-12 text-white lg:flex">
         <DecorativePattern />
+        <PlumWatermark className="absolute -bottom-20 -right-28 z-0 w-[420px]" />
 
         <div className="relative z-10">
           <Logo variant="white" width={160} height={38} priority />
@@ -129,10 +112,8 @@ export default function LoginPage() {
             <Logo width={140} height={34} priority />
           </div>
 
-          {!forgotMode ? (
-            <>
-              <h2 className="mb-6 text-center text-2xl font-bold text-ff-text">Sign In</h2>
-              <form onSubmit={handleSubmit} className="space-y-4">
+          <h2 className="mb-6 text-center text-2xl font-bold text-ff-text">Sign In</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label htmlFor="email" className="mb-1 block text-sm text-ff-textMuted">
                     Email <span className="text-ff-danger">*</span>
@@ -169,13 +150,9 @@ export default function LoginPage() {
                     </button>
                   </div>
                   <div className="mt-1.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setForgotMode(true)}
-                      className="text-xs text-ff-accent hover:underline"
-                    >
-                      Forgot Password ?
-                    </button>
+                    <Link href="/forgot-password" className="text-xs text-ff-accent hover:underline">
+                      Forgot Password?
+                    </Link>
                   </div>
                 </div>
 
@@ -202,61 +179,6 @@ export default function LoginPage() {
                 </a>
                 .
               </p>
-            </>
-          ) : (
-            <>
-              <h2 className="mb-2 text-center text-2xl font-bold text-ff-text">Reset Password</h2>
-              <p className="mb-6 text-center text-sm text-ff-textMuted">
-                Enter your email and we&apos;ll send you a link to reset your password.
-              </p>
-              {resetStatus === "sent" ? (
-                <p className="rounded-ff border border-ff-success/30 bg-ff-success/10 p-3 text-center text-sm text-ff-success">
-                  Check your inbox for a reset link.
-                </p>
-              ) : (
-                <form onSubmit={handleResetRequest} className="space-y-4">
-                  <div>
-                    <label htmlFor="resetEmail" className="mb-1 block text-sm text-ff-textMuted">
-                      Email
-                    </label>
-                    <input
-                      id="resetEmail"
-                      type="email"
-                      required
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
-                      className="w-full rounded-ff border border-ff-border bg-ff-lavender/60 px-3 py-2.5 text-sm outline-none transition-colors focus:border-ff-accent focus:bg-white focus:shadow-ff-glow"
-                    />
-                  </div>
-                  <AlertModal
-                    message={resetStatus === "error" ? resetErrorMessage ?? "Could not send reset link. Please try again." : null}
-                    onClose={() => setResetStatus("idle")}
-                  />
-                  <button
-                    type="submit"
-                    disabled={resetStatus === "sending"}
-                    className="flex w-full items-center justify-center rounded-full bg-ff-accent-gradient py-2.5 text-sm font-medium text-white shadow-ff-md transition-all hover:shadow-ff-lg hover:brightness-105 disabled:opacity-60"
-                  >
-                    {resetStatus === "sending" ? (
-                      <BrandedLoader size={18} variant="white" label="Sending..." />
-                    ) : (
-                      "Send Reset Link"
-                    )}
-                  </button>
-                </form>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotMode(false);
-                  setResetStatus("idle");
-                }}
-                className="mt-4 w-full text-center text-xs text-ff-accent hover:underline"
-              >
-                Back to Sign In
-              </button>
-            </>
-          )}
         </div>
       </div>
 

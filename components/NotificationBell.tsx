@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus } from "lucide-react";
+import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus, XCircle, ThumbsUp, AtSign } from "lucide-react";
 import { formatDateTime } from "@/lib/formatDate";
 
 type NotificationItem = {
   id: string;
-  type: "published" | "revoked" | "new_version";
+  type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged";
   title: string;
   body: string | null;
   documentId: string | null;
@@ -15,13 +15,32 @@ type NotificationItem = {
   createdAt: string;
 };
 
-const POLL_INTERVAL_MS = 30_000;
+// Decision-outcome notifications (your own submission just got approved,
+// rejected, or an already-published one got pulled back) jump straight to
+// the Review Status section instead of the top of the document page — see
+// ReviewTrail.tsx's own #review-status target and highlight-on-arrival
+// effect.
+const LINKS_TO_REVIEW_STATUS = new Set<NotificationItem["type"]>(["approved", "rejected", "revoked"]);
+
+// Was 30s. With the DB connection pool confirmed as the real bottleneck
+// (see the perf investigation this session — Supabase's session-mode
+// pooler queues or outright rejects connections well before 500
+// concurrent users' worth of polling), every open tab hitting this route
+// this often is real, avoidable pressure on an already-constrained shared
+// pool. A few extra seconds of notification latency is a better tradeoff
+// than the pool queueing or failing under load — same reasoning already
+// applied to AnnouncementTicker.tsx and NewDocumentsProvider.tsx.
+const POLL_INTERVAL_MS = 45_000;
 const DESKTOP_OPT_IN_KEY = "ff-desktop-notifications";
 
 const TYPE_ICON: Record<NotificationItem["type"], typeof FileCheck> = {
   published: FileCheck,
   revoked: Undo2,
   new_version: FilePlus,
+  approved: FileCheck,
+  rejected: XCircle,
+  feedback_accepted: ThumbsUp,
+  feedback_tagged: AtSign,
 };
 
 export default function NotificationBell({ collapsed }: { collapsed: boolean }) {
@@ -187,7 +206,9 @@ export default function NotificationBell({ collapsed }: { collapsed: boolean }) 
                       >
                         <span
                           className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                            n.type === "revoked" ? "bg-ff-danger/15 text-ff-danger" : "bg-ff-accent/15 text-ff-accent"
+                            n.type === "revoked" || n.type === "rejected"
+                              ? "bg-ff-danger/15 text-ff-danger"
+                              : "bg-ff-accent/15 text-ff-accent"
                           }`}
                         >
                           <Icon className="h-3.5 w-3.5" aria-hidden />
@@ -203,7 +224,10 @@ export default function NotificationBell({ collapsed }: { collapsed: boolean }) 
                     return (
                       <li key={n.id}>
                         {n.documentId ? (
-                          <Link href={`/dashboard/documents/${n.documentId}`} onClick={() => { if (!n.read) markRead(n.id); setOpen(false); }}>
+                          <Link
+                            href={`/dashboard/documents/${n.documentId}${LINKS_TO_REVIEW_STATUS.has(n.type) ? "#review-status" : ""}`}
+                            onClick={() => { if (!n.read) markRead(n.id); setOpen(false); }}
+                          >
                             {content}
                           </Link>
                         ) : (

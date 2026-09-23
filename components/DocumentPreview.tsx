@@ -152,7 +152,7 @@ export default function DocumentPreview({
               ) : extractedText ? (
                 <div className="p-4">
                   <p className="mb-3 text-xs text-ff-textMuted">
-                    This file type can&apos;t be rendered inline — showing its extracted text content instead.
+                    This file type can&apos;t be rendered inline, showing its extracted text content instead.
                   </p>
                   <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-ff border border-ff-border bg-ff-lavender/40 p-3 text-sm text-ff-text">
                     {extractedText}
@@ -160,7 +160,7 @@ export default function DocumentPreview({
                 </div>
               ) : (
                 <div className="p-10 text-center text-sm text-ff-textMuted">
-                  No preview available for this file type — download it to view the content.
+                  No preview available for this file type. Download it to view the content.
                 </div>
               )}
             </div>

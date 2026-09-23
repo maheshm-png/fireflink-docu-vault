@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: "Message can't be empty." }, { status: 400 });
     }
     if (message.length > 300) {
-      return NextResponse.json({ error: "Keep it under 300 characters — this scrolls in a single line." }, { status: 400 });
+      return NextResponse.json({ error: "Keep it under 300 characters, this scrolls in a single line." }, { status: 400 });
     }
     data.message = message.trim();
   }

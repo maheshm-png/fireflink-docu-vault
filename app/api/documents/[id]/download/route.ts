@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { getDownloadUrl, getFileBuffer } from "@/lib/storage";
 import { logAudit } from "@/lib/audit";
 import { addWatermark } from "@/lib/watermark";
+import { computeRoundAttempts, everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 
 const WATERMARKED_DOC_TYPES = new Set(["doc", "ppt", "excel"]);
@@ -13,13 +14,29 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 };
 
+// The downloaded filename embeds the document title + its Round.Attempt
+// label (e.g. "My Policy (v1.1).pdf") instead of just whatever the
+// uploader originally named the file — the original name is often
+// something like "final_v2_reviewed.docx" that says nothing about which
+// reviewed attempt this actually is once it's sitting in someone's
+// Downloads folder next to three other versions of the same document.
+function safeFilenameFromTitle(title: string): string {
+  return title.replace(/[\\/:*?"<>|]/g, "").trim() || "document";
+}
+function buildDownloadFilename(title: string, label: string, ext: string): string {
+  return `${safeFilenameFromTitle(title)} (${label}).${ext}`;
+}
+
 // GET /api/documents/:id/download?version=3 (omit for current/published version)
 //
 // Every active user (Manager, SC, BD, and view-only Other alike) can reach
 // this route and download a *published* document — download is part of
-// "view access," same as seeing it in the dashboard. Only the uploader,
-// the doc's owner, or a Manager/Superadmin can download a version that's
-// still pending review or was rejected.
+// "view access," same as seeing it in the dashboard. But only the actual
+// current live version is ever downloadable, by anyone, regardless of role
+// — an older approved version, the newest upload while it's still pending
+// review, or a rejected attempt are all view-only now (see /preview for
+// that instead). Reviewers/contributors still need to look at those while
+// deciding, they just can't download a copy of them.
 //
 // The file is served byte-for-byte from storage via a redirect to a
 // presigned URL — nothing here re-encodes, re-compresses, or otherwise
@@ -56,11 +73,32 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const reviewRequests = await prisma.reviewRequest.findMany({
+    where: { documentId: document.id },
+    select: { roundNumber: true, status: true, comments: true, createdAt: true, reviewerId: true },
+  });
+
+  // Same "is there a real, currently-live approved version" check the
+  // dashboard page uses (app/dashboard/documents/[id]/page.tsx's
+  // hasEverPublished/isPubliclyVisible): a document simply back in
+  // re-review after already being published once (status pending_review or
+  // rejected) must stay downloadable to everyone, same as it stays visible
+  // there. Checking the raw document.status === "published" here would 404
+  // a document the dashboard just showed as accessible.
+  const hasEverPublished =
+    document.currentVersionId !== null &&
+    everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt).has(document.currentVersionId);
+  const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+
+  // Uploader/owner/an assigned reviewer (any round)/superadmin, same
+  // narrower rule as app/dashboard/documents/[id]/page.tsx's
+  // canSeeUnpublishedDoc — a manager with no assignment on this document
+  // can't download it early either.
   const canAccessUnpublished =
-    document.status === "published" ||
+    isPubliclyVisible ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
-    user.role === "manager" ||
+    reviewRequests.some((r) => r.reviewerId === user.id) ||
     user.role === "superadmin";
 
   if (!canAccessUnpublished) {
@@ -73,21 +111,25 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
-  // The base view-only "user" role only ever gets the current version —
-  // older versions are a contributor/manager-tier concern (comparing
-  // changes, auditing what an earlier reviewer approved), not something a
-  // view-only reader needs. Enforced here (not just by omitting the UI
-  // control) since ?version= is a plain query param anyone could add by
-  // hand.
-  if (user.role === "user" && document.currentVersionId !== version.id) {
+  // Only the current live version can ever be downloaded — enforced here
+  // (not just by omitting the UI control) since ?version= is a plain query
+  // param anyone could add by hand. Applies to every role: a manager or the
+  // uploader reviewing a fresh upload can still PREVIEW it (/preview has no
+  // such restriction), just not download a copy until it's actually
+  // published and becomes the current version.
+  if (document.currentVersionId !== version.id) {
     return NextResponse.json({ error: "Only the current version is available to download." }, { status: 403 });
   }
+
+  const versionLabelValue =
+    computeRoundAttempts(document.versions, reviewRequests, document.revokedAt).byVersionId.get(version.id)?.label ??
+    `v${version.versionNumber}`;
 
   if (format === "pdf") {
     if (!version.previewPdfPath) {
       return NextResponse.json({ error: "No PDF version is available for this file." }, { status: 400 });
     }
-    const pdfFilename = version.originalFilename.replace(/\.[^./]+$/, ".pdf");
+    const pdfFilename = buildDownloadFilename(document.title, versionLabelValue, "pdf");
     const url = await getDownloadUrl(version.previewPdfPath, pdfFilename);
 
     await prisma.documentEvent.create({
@@ -108,7 +150,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     } catch (err) {
       console.error(`Watermarking failed for document ${document.id} version ${version.id}:`, err);
       return NextResponse.json(
-        { error: "Could not prepare a watermarked copy of this file — ask a contributor or manager to download it." },
+        { error: "Could not prepare a watermarked copy of this file, ask a contributor or manager to download it." },
         { status: 500 }
       );
     }
@@ -120,7 +162,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const ext = version.originalFilename.toLowerCase().split(".").pop() ?? "";
     const contentType = MIME_BY_EXTENSION[ext] ?? "application/octet-stream";
-    const filename = encodeURIComponent(version.originalFilename);
+    const filename = encodeURIComponent(buildDownloadFilename(document.title, versionLabelValue, ext));
     return new NextResponse(new Uint8Array(watermarked), {
       headers: {
         "Content-Type": contentType,
@@ -129,7 +171,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     });
   }
 
-  const url = await getDownloadUrl(version.filePath, version.originalFilename);
+  const originalExt = version.originalFilename.split(".").pop() ?? "";
+  const url = await getDownloadUrl(version.filePath, buildDownloadFilename(document.title, versionLabelValue, originalExt));
 
   await prisma.documentEvent.create({
     data: { documentId: document.id, userId: user.id, type: "download" },

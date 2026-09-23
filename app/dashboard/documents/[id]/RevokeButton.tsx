@@ -15,7 +15,7 @@ export default function RevokeButton({ documentId }: { documentId: string }) {
 
   async function revoke() {
     if (!reason.trim()) {
-      setError("A reason is required — it's shown to everyone browsing revoked documents.");
+      setError("A reason is required, it's shown to everyone browsing revoked documents.");
       return;
     }
     setBusy(true);
@@ -28,7 +28,7 @@ export default function RevokeButton({ documentId }: { documentId: string }) {
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not revoke this document — please try again.");
+      setError(data?.error ?? "Could not revoke this document, please try again.");
       return;
     }
     setConfirming(false);

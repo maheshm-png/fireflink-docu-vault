@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import Badge from "@/components/Badge";
 
 export type DetailTab = {
   key: string;
@@ -37,11 +38,40 @@ export type DetailTab = {
 export default function DocumentDetailTabs({ tabs }: { tabs: DetailTab[] }) {
   const [active, setActive] = useState(tabs[0]?.key);
 
+  // Panels toggle via CSS visibility (see the comment below), not mount/
+  // unmount, and this component itself doesn't remount just because its
+  // `tabs` prop changed shape — e.g. the "Waiting for review"/"Under
+  // review" badge (app/dashboard/documents/[id]/page.tsx) links to this
+  // same route with #review-status to jump straight to the Review tab,
+  // but a hash-only navigation to a route already open doesn't remount
+  // anything: `active` would otherwise stay stuck on whatever tab was
+  // selected before (Feedback, say), so the Review tab never actually
+  // shows despite the URL having changed. This catches that hash and
+  // switches tabs for real, then scrolls to the target section once it's
+  // actually visible — the browser's own native hash-scroll can't reach
+  // it while it's still display:none from being the inactive panel.
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.hash !== "#review-status") return;
+    if (!tabs.some((t) => t.key === "review")) return;
+    setActive("review");
+    const frame = requestAnimationFrame(() => {
+      document.getElementById("review-status")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [tabs]);
+
   if (tabs.length === 0) return null;
 
   return (
     <div className="mb-6 overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff">
-      <div className="flex gap-1 overflow-x-auto border-b-2 border-ff-border px-2">
+      {/* overflow-x-auto with no overflow-y set makes the browser compute
+          overflow-y as auto too (a real CSS Overflow Module behavior, not a
+          Tailwind quirk) — the instant this row's own content is even a
+          pixel taller than the row (an icon's line-height, a badge's
+          padding), that gives it its own spurious vertical scrollbar.
+          overflow-y-hidden pins it back to "never scrolls vertically,"
+          leaving only the intended horizontal scroll-on-overflow. */}
+      <div className="flex gap-1 overflow-x-auto overflow-y-hidden border-b-2 border-ff-border px-2">
         {tabs.map((tab) => {
           const isActive = tab.key === active;
           return (
@@ -49,26 +79,18 @@ export default function DocumentDetailTabs({ tabs }: { tabs: DetailTab[] }) {
               key={tab.key}
               type="button"
               onClick={() => setActive(tab.key)}
-              className={`-mb-0.5 flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${
+              className={`-mb-0.5 flex shrink-0 items-center gap-2 rounded-t-ff border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${
                 isActive
-                  ? "border-ff-accent text-ff-accent"
-                  : "border-transparent text-ff-textMuted hover:border-transparent hover:text-ff-accent"
+                  ? "border-ff-accent bg-ff-lavender/50 text-ff-accent"
+                  : "border-transparent text-ff-textMuted hover:border-transparent hover:bg-ff-lavender/30 hover:text-ff-accent"
               }`}
             >
               {tab.icon}
               {tab.label}
               {tab.badge && tab.badge.count > 0 && (
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    tab.badge.attention
-                      ? "bg-ff-warning/15 text-ff-warning"
-                      : isActive
-                      ? "bg-ff-accent/15 text-ff-accent"
-                      : "bg-ff-lavender text-ff-textMuted"
-                  }`}
-                >
+                <Badge variant={tab.badge.attention ? "warning" : isActive ? "accent" : "neutral"}>
                   {tab.badge.count}
-                </span>
+                </Badge>
               )}
             </button>
           );

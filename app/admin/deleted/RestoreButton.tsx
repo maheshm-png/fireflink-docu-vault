@@ -17,7 +17,7 @@ export default function RestoreButton({ documentId }: { documentId: string }) {
     const res = await fetch(`/api/documents/${documentId}/restore`, { method: "POST" });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not restore this document — please try again.");
+      setError(data?.error ?? "Could not restore this document, please try again.");
       setBusy(false);
       return;
     }

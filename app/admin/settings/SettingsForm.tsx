@@ -33,7 +33,7 @@ export default function SettingsForm({
     setSaving(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not save settings — please try again.");
+      setError(data?.error ?? "Could not save settings, please try again.");
       return;
     }
     setSaved(true);

@@ -11,7 +11,7 @@ export default async function UploadPage({ searchParams }: { searchParams: { cat
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <UploadForm initialCategoryId={searchParams.category} myReportsToId={user.reportsToId} />
     </div>
   );

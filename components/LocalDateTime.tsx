@@ -15,11 +15,11 @@ import { formatDate, formatDateTime } from "@/lib/formatDate";
 export function LocalDate({ value }: { value: string | Date }) {
   const [text, setText] = useState<string | null>(null);
   useEffect(() => setText(formatDate(value)), [value]);
-  return <>{text ?? "—"}</>;
+  return <>{text ?? "…"}</>;
 }
 
 export function LocalDateTime({ value }: { value: string | Date }) {
   const [text, setText] = useState<string | null>(null);
   useEffect(() => setText(formatDateTime(value)), [value]);
-  return <>{text ?? "—"}</>;
+  return <>{text ?? "…"}</>;
 }

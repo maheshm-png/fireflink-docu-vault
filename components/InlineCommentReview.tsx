@@ -126,6 +126,7 @@ export default function InlineCommentReview({
         icon={MessageSquarePlus}
         heading="Inline Comments"
         description="Select any text on the document below to comment on a specific passage. Sent to the uploader along with your decision."
+        collapsible
       />
     );
   }
@@ -141,6 +142,7 @@ export default function InlineCommentReview({
       heading="Inline Comments"
       description="Highlight any text below to comment on a specific passage. Sent to the uploader along with your decision."
       plainPlaceholder="Add a comment for the uploader..."
+      collapsible
     />
   );
 }

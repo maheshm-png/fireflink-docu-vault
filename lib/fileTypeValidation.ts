@@ -39,14 +39,14 @@ export function validateFileMatchesDocType(buffer: Buffer, filename: string, doc
   if (docType === "pdf") {
     return startsWith(buffer, PDF_MAGIC)
       ? null
-      : `This file doesn't look like a real PDF (its content doesn't start with a PDF header) — double-check the file and the document type.`;
+      : `This file doesn't look like a real PDF (its content doesn't start with a PDF header). Double-check the file and the document type.`;
   }
 
   if (docType === "ppt" || docType === "doc" || (docType === "excel" && ext !== "csv")) {
     const looksLikeOfficeFile = startsWith(buffer, OOXML_ZIP_MAGIC) || startsWith(buffer, OLE_MAGIC);
     return looksLikeOfficeFile
       ? null
-      : `This file doesn't look like ${OFFICE_LABELS[docType]} — double-check the file and the document type.`;
+      : `This file doesn't look like ${OFFICE_LABELS[docType]}. Double-check the file and the document type.`;
   }
 
   return null; // video / other / csv / link — nothing reliable to check

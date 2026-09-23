@@ -36,11 +36,25 @@ export default function PptxSlideViewer({
   // preview-modal usage (DocumentPreview.tsx) is unchanged unless a caller
   // opts in.
   allowFullscreen = false,
+  // Rendered as an overlay inside stageRef — see components/
+  // FullscreenPreviewFrame.tsx's own watermark prop for why it has to live
+  // inside the fullscreen ref'd element specifically (components/
+  // ViewOnlyWatermark.tsx, from the share page), not just alongside this
+  // component.
+  watermark,
+  // See components/PdfPageViewer.tsx's own disableInteraction comment —
+  // same deterrents (no right-click, no text selection), applied here
+  // because this renderer's slide text is real DOM text (unlike that
+  // component's canvas-only render), so it's actually selectable/copyable
+  // without this.
+  disableInteraction = false,
 }: {
   documentId: string;
   version?: number;
   fetchUrl?: string;
   allowFullscreen?: boolean;
+  watermark?: React.ReactNode;
+  disableInteraction?: boolean;
 }) {
   const [deck, setDeck] = useState<SlideDeck | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +73,7 @@ export default function PptxSlideViewer({
         return r.json();
       })
       .then(setDeck)
-      .catch(() => setError("Could not render slides for this presentation — try downloading it instead."));
+      .catch(() => setError("Could not render slides for this presentation, try downloading it instead."));
   }, [documentId, version, fetchUrl]);
 
   // Tracks fullscreen state via the browser's own change event (not just
@@ -111,7 +125,7 @@ export default function PptxSlideViewer({
   if (deck.slides.length === 0) {
     return (
       <div className="p-10 text-center text-sm text-ff-textMuted">
-        No renderable slides found in this file — try downloading instead.
+        No renderable slides found in this file, try downloading instead.
       </div>
     );
   }
@@ -182,14 +196,21 @@ export default function PptxSlideViewer({
       {/* In fullscreen, this outer box IS the browser's fullscreen element
           (see toggleFullscreen) — it just centers slideBox at whatever size
           fits the screen while slideBox itself keeps the deck's real aspect
-          ratio, rather than being stretched to fill the whole rectangle. */}
+          ratio, rather than being stretched to fill the whole rectangle.
+          bg-white (not the more conventional black letterbox) because
+          slideBox below is *always* rendered on white regardless of the
+          source deck's actual theme — this renderer approximates layout,
+          not theme colors (see the caption at the bottom of this
+          component) — so white is the one color guaranteed to actually
+          match the slide content, not just a generic dark frame around it. */}
       <div
         ref={stageRef}
-        className={
+        onContextMenu={disableInteraction ? (e) => e.preventDefault() : undefined}
+        className={`${
           fullscreen
-            ? "flex h-screen w-screen items-center justify-center bg-black"
-            : "w-full max-w-3xl rounded-ff border border-ff-border shadow-ff"
-        }
+            ? "relative flex h-screen w-screen items-center justify-center bg-white"
+            : "relative w-full max-w-3xl rounded-ff border border-ff-border shadow-ff"
+        } ${disableInteraction ? "select-none" : ""}`}
       >
         {fullscreen ? (
           <div style={{ aspectRatio: `${deck.width} / ${deck.height}`, maxHeight: "100vh", maxWidth: "100vw", width: "100%" }}>
@@ -198,6 +219,7 @@ export default function PptxSlideViewer({
         ) : (
           slideBox
         )}
+        {watermark}
       </div>
 
       <div className="flex items-center gap-3 text-sm text-ff-textMuted">
@@ -253,7 +275,7 @@ export default function PptxSlideViewer({
       )}
 
       <p className="max-w-md text-center text-xs text-ff-textMuted">
-        Approximate rendering — text formatting and images shown in position; animations, theme colors, tables,
+        Approximate rendering, text formatting and images shown in position; animations, theme colors, tables,
         charts, and complex effects aren&apos;t reproduced.
       </p>
     </div>

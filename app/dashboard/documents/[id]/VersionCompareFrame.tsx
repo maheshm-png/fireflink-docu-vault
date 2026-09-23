@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import PdfPageViewer from "@/components/PdfPageViewer";
 
-type VersionMeta = { versionNumber: number; hasPreviewPdf: boolean };
+type VersionMeta = { versionNumber: number; label: string; hasPreviewPdf: boolean };
 
 /**
  * Side-by-side "as uploaded" version compare — both versions render through
@@ -30,6 +30,18 @@ type VersionMeta = { versionNumber: number; hasPreviewPdf: boolean };
  * fullscreening a single panel would hide its sibling panel and label
  * entirely instead of giving a bigger side-by-side view.
  */
+// Rough perceptual luminance from a PdfPageViewer-sampled "rgb(r, g, b)"
+// string — used to decide whether the frame needs light or dark text/icons
+// on top of it, since the frame's own background now follows whatever
+// color was actually sampled instead of always being dark.
+function isDarkColor(rgb: string | null): boolean {
+  if (!rgb) return true;
+  const m = rgb.match(/\d+/g);
+  if (!m) return true;
+  const [r, g, b] = m.map(Number);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.6;
+}
+
 export default function VersionCompareFrame({
   documentId,
   docType,
@@ -43,6 +55,16 @@ export default function VersionCompareFrame({
   const [toV, setToV] = useState(versions[0].versionNumber);
   const [fullscreen, setFullscreen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  // Each panel reports its own sampled page color (see PdfPageViewer.tsx's
+  // onBackgroundColorChange) — the frame around both of them (the gap
+  // between panels, the From/To label row) picks up the "from" panel's
+  // color, falling back to "to"'s, so the whole fullscreen frame matches
+  // the actual documents instead of staying a fixed dark neutral no matter
+  // what they render on.
+  const [fromBg, setFromBg] = useState<string | null>(null);
+  const [toBg, setToBg] = useState<string | null>(null);
+  const frameBg = fromBg ?? toBg ?? "#1e1e1e";
+  const frameIsDark = isDarkColor(frameBg);
 
   useEffect(() => {
     function onChange() {
@@ -86,10 +108,11 @@ export default function VersionCompareFrame({
 
       <div
         ref={stageRef}
-        className={fullscreen ? "flex h-screen flex-col bg-[#1e1e1e] p-3" : ""}
+        className={fullscreen ? "flex h-screen flex-col p-3" : ""}
+        style={fullscreen ? { backgroundColor: frameBg } : undefined}
       >
         <div className={`mb-3 flex items-center gap-3 text-sm ${fullscreen ? "shrink-0" : ""}`}>
-          <label className={`flex items-center gap-1 ${fullscreen ? "text-white" : ""}`}>
+          <label className={`flex items-center gap-1 ${fullscreen && frameIsDark ? "text-white" : fullscreen ? "text-ff-text" : ""}`}>
             From
             <select
               value={fromV}
@@ -97,11 +120,11 @@ export default function VersionCompareFrame({
               className="rounded-ff border border-ff-border px-2 py-1 text-ff-text"
             >
               {versions.map((v) => (
-                <option key={v.versionNumber} value={v.versionNumber}>v{v.versionNumber}</option>
+                <option key={v.versionNumber} value={v.versionNumber}>{v.label}</option>
               ))}
             </select>
           </label>
-          <label className={`flex items-center gap-1 ${fullscreen ? "text-white" : ""}`}>
+          <label className={`flex items-center gap-1 ${fullscreen && frameIsDark ? "text-white" : fullscreen ? "text-ff-text" : ""}`}>
             To
             <select
               value={toV}
@@ -109,7 +132,7 @@ export default function VersionCompareFrame({
               className="rounded-ff border border-ff-border px-2 py-1 text-ff-text"
             >
               {versions.map((v) => (
-                <option key={v.versionNumber} value={v.versionNumber}>v{v.versionNumber}</option>
+                <option key={v.versionNumber} value={v.versionNumber}>{v.label}</option>
               ))}
             </select>
           </label>
@@ -117,21 +140,29 @@ export default function VersionCompareFrame({
 
         <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${fullscreen ? "min-h-0 flex-1" : ""}`}>
           <div className={fullscreen ? "flex h-full min-h-0 flex-col" : ""}>
-            <div className={`mb-1 text-xs font-medium ${fullscreen ? "shrink-0 text-white" : "text-ff-textMuted"}`}>
-              v{fromV}
+            <div
+              className={`mb-1 text-xs font-medium ${
+                fullscreen ? `shrink-0 ${frameIsDark ? "text-white" : "text-ff-text"}` : "text-ff-textMuted"
+              }`}
+            >
+              {fromMeta.label}
             </div>
             {canPreview(fromMeta) ? (
-              <PdfPageViewer documentId={documentId} version={fromV} fillHeight={fullscreen} />
+              <PdfPageViewer documentId={documentId} version={fromV} fillHeight={fullscreen} onBackgroundColorChange={setFromBg} />
             ) : (
               noPreviewMsg
             )}
           </div>
           <div className={fullscreen ? "flex h-full min-h-0 flex-col" : ""}>
-            <div className={`mb-1 text-xs font-medium ${fullscreen ? "shrink-0 text-white" : "text-ff-textMuted"}`}>
-              v{toV}
+            <div
+              className={`mb-1 text-xs font-medium ${
+                fullscreen ? `shrink-0 ${frameIsDark ? "text-white" : "text-ff-text"}` : "text-ff-textMuted"
+              }`}
+            >
+              {toMeta.label}
             </div>
             {canPreview(toMeta) ? (
-              <PdfPageViewer documentId={documentId} version={toV} fillHeight={fullscreen} />
+              <PdfPageViewer documentId={documentId} version={toV} fillHeight={fullscreen} onBackgroundColorChange={setToBg} />
             ) : (
               noPreviewMsg
             )}

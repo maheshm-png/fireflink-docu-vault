@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Trash2, Pause, Play, Pencil } from "lucide-react";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
-import { formatDateTime } from "@/lib/formatDate";
+import ConfirmModal from "@/components/ConfirmModal";
+import { LocalDateTime } from "@/components/LocalDateTime";
 
 type Announcement = {
   id: string;
@@ -39,7 +40,7 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
     setPosting(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not post this announcement — please try again.");
+      setError(data?.error ?? "Could not post this announcement, please try again.");
       return;
     }
     setNewMessage("");
@@ -56,7 +57,7 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
     setBusyId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not save changes — please try again.");
+      setError(data?.error ?? "Could not save changes, please try again.");
       return;
     }
     setEditingId(null);
@@ -73,7 +74,7 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
     setBusyId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not update this announcement — please try again.");
+      setError(data?.error ?? "Could not update this announcement, please try again.");
       return;
     }
     router.refresh();
@@ -86,7 +87,7 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
     setConfirmingDeleteId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not delete this announcement — please try again.");
+      setError(data?.error ?? "Could not delete this announcement, please try again.");
       return;
     }
     router.refresh();
@@ -162,67 +163,58 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
                     {a.message}
                   </p>
                   <p className="mt-1 text-xs text-ff-textMuted">
-                    {a.createdByName} · {formatDateTime(a.createdAt)}
+                    {a.createdByName} · <LocalDateTime value={a.createdAt} />
                     {!a.isActive && <span className="ml-1.5 text-ff-warning">· On hold</span>}
                   </p>
                 </div>
-                {confirmingDeleteId === a.id ? (
-                  <div className="flex shrink-0 items-center gap-2 text-sm">
-                    <span className="text-ff-textMuted">Delete for good?</span>
-                    <button
-                      onClick={() => remove(a.id)}
-                      disabled={busyId === a.id}
-                      className="flex items-center justify-center rounded-ff bg-ff-danger px-2.5 py-1 text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                    >
-                      {busyId === a.id ? <BrandedLoader size={12} variant="white" /> : "Yes"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmingDeleteId(null)}
-                      disabled={busyId === a.id}
-                      className="rounded-ff border border-ff-border px-2.5 py-1 text-ff-text hover:bg-ff-lavender"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setEditingId(a.id);
-                        setEditValue(a.message);
-                      }}
-                      disabled={busyId === a.id}
-                      title="Edit"
-                      aria-label="Edit"
-                      className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text disabled:opacity-50"
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden />
-                    </button>
-                    <button
-                      onClick={() => toggleHold(a.id, a.isActive)}
-                      disabled={busyId === a.id}
-                      title={a.isActive ? "Hold" : "Resume"}
-                      aria-label={a.isActive ? "Hold" : "Resume"}
-                      className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text disabled:opacity-50"
-                    >
-                      {a.isActive ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
-                    </button>
-                    <button
-                      onClick={() => setConfirmingDeleteId(a.id)}
-                      disabled={busyId === a.id}
-                      title="Delete"
-                      aria-label="Delete"
-                      className="rounded p-1.5 text-ff-textMuted transition-colors hover:border-ff-danger/40 hover:bg-ff-danger/10 hover:text-ff-danger disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden />
-                    </button>
-                  </div>
-                )}
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setEditingId(a.id);
+                      setEditValue(a.message);
+                    }}
+                    disabled={busyId === a.id}
+                    title="Edit"
+                    aria-label="Edit"
+                    className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text disabled:opacity-50"
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden />
+                  </button>
+                  <button
+                    onClick={() => toggleHold(a.id, a.isActive)}
+                    disabled={busyId === a.id}
+                    title={a.isActive ? "Hold" : "Resume"}
+                    aria-label={a.isActive ? "Hold" : "Resume"}
+                    className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text disabled:opacity-50"
+                  >
+                    {a.isActive ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDeleteId(a.id)}
+                    disabled={busyId === a.id}
+                    title="Delete"
+                    aria-label="Delete"
+                    className="rounded p-1.5 text-ff-textMuted transition-colors hover:border-ff-danger/40 hover:bg-ff-danger/10 hover:text-ff-danger disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
               </div>
             )}
           </div>
         ))}
       </div>
+
+      <ConfirmModal
+        open={confirmingDeleteId !== null}
+        title="Delete this announcement?"
+        message="This can't be undone."
+        confirmLabel="Yes, delete"
+        danger
+        busy={busyId === confirmingDeleteId}
+        onConfirm={() => confirmingDeleteId && remove(confirmingDeleteId)}
+        onCancel={() => setConfirmingDeleteId(null)}
+      />
     </div>
   );
 }

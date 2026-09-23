@@ -119,3 +119,25 @@ create policy "announcements_update_admin_only" on "Announcement"
 
 create policy "announcements_delete_admin_only" on "Announcement"
   for delete using (current_role_name() in ('manager','superadmin'));
+
+-- Teams: everyone can read (shown alongside a user's name/role, grouping on
+-- app/admin/users); only superadmin manages the option list itself
+-- (app/admin/teams). Same shape as Designation above.
+alter table "Team" enable row level security;
+
+create policy "teams_read_all" on "Team"
+  for select using (auth.uid() is not null);
+
+create policy "teams_write_admin_only" on "Team"
+  for insert with check (current_role_name() = 'superadmin');
+
+create policy "teams_delete_admin_only" on "Team"
+  for delete using (current_role_name() = 'superadmin');
+
+-- Password reset OTPs: never readable or writable through PostgREST for
+-- any role, including authenticated. The app's own service-role Postgres
+-- connection (DATABASE_URL/DIRECT_URL, which RLS doesn't apply to) is the
+-- only thing that ever issues or verifies these codes. Enabling RLS with no
+-- matching policy denies all PostgREST access outright, which is the
+-- correct default for a table holding email + code hashes.
+alter table "PasswordResetOtp" enable row level security;

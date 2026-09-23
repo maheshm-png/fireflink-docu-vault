@@ -1,15 +1,19 @@
 "use client";
 
 import { MessageSquareQuote } from "lucide-react";
-import HighlightCommentPanel, { type PanelItem } from "./HighlightCommentPanel";
-import PdfHighlightViewer from "./PdfHighlightViewer";
+import HighlightCommentPanel from "./HighlightCommentPanel";
+import PdfHighlightViewer, { type PdfPanelItem } from "./PdfHighlightViewer";
 
 export type ReviewHighlight = {
   id: string;
   highlightedText: string | null;
   comment: string;
   reviewerName: string;
-  roundNumber: number;
+  // The Round.Attempt label (e.g. "v1.1") this comment's round resolves to
+  // — see lib/versionRounds.ts's own header comment. Was a raw roundNumber
+  // rendered as "Round N"; app/dashboard/documents/[id]/
+  // ReviewTrailWithHighlights.tsx now computes the real label instead.
+  roundLabel: string;
   editedAt?: string | null;
 };
 
@@ -48,12 +52,13 @@ export default function ReviewHighlightsViewer({
 }) {
   if (highlights.length === 0) return null;
 
-  const items: PanelItem[] = highlights.map((h) => ({
+  const items: PdfPanelItem[] = highlights.map((h) => ({
     id: h.id,
     highlightedText: h.highlightedText,
     comment: h.comment,
     authorId: h.id,
-    authorLabel: `${h.reviewerName} · Round ${h.roundNumber}`,
+    authorLabel: h.reviewerName,
+    roundLabel: h.roundLabel,
     canDelete: false,
     canEdit: false,
     editedAt: h.editedAt,

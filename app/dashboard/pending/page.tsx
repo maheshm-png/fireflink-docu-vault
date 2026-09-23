@@ -9,6 +9,7 @@ import Navbar from "@/components/Navbar";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
 import ViewToggle from "@/components/ViewToggle";
+import { computeRoundAttempts } from "@/lib/versionRounds";
 
 // No "revoked" tab here — see app/dashboard/revoked/page.tsx instead, the
 // org-wide view-only listing that superseded showing revoked docs in this
@@ -39,7 +40,7 @@ export default async function ReviewDashboardPage({
     ? (searchParams.status as (typeof STATUS_TABS)[number]["key"])
     : "pending_review";
 
-  // Personal queue for everyone, managers included — a document only shows
+  // Personal queue for everyone except superadmin — a document only shows
   // up here for someone who's either uploaded it (any version) or is/was an
   // assigned reviewer on it (any round, so it stays visible after they've
   // decided too, not just while pending). A manager who was never assigned
@@ -49,14 +50,23 @@ export default async function ReviewDashboardPage({
   // uploaded that specific version can replace it (see canUploadVersion in
   // app/dashboard/documents/[id]/page.tsx) — that might not be the
   // document's original uploader, so they still need to be able to find it.
-  const baseWhere = {
-    deletedAt: null,
-    OR: [
-      { uploadedById: user.id },
-      { versions: { some: { uploadedById: user.id } } },
-      { reviewRequests: { some: { reviewerId: user.id } } },
-    ],
-  };
+  // Superadmin gets the org-wide picture instead: they're deliberately
+  // excluded from ever being assigned as a reviewer (see approveReview in
+  // lib/rbac.ts), so a personal-queue scope would leave this page
+  // permanently empty for them even though nothing about their role limits
+  // what they're allowed to SEE — same oversight reach they already have on
+  // Deleted Documents and the audit log, just applied here too.
+  const baseWhere =
+    user.role === "superadmin"
+      ? { deletedAt: null }
+      : {
+          deletedAt: null,
+          OR: [
+            { uploadedById: user.id },
+            { versions: { some: { uploadedById: user.id } } },
+            { reviewRequests: { some: { reviewerId: user.id } } },
+          ],
+        };
 
   const [docs, tabCounts] = await Promise.all([
     prisma.document.findMany({
@@ -65,13 +75,20 @@ export default async function ReviewDashboardPage({
         category: true,
         uploadedBy: true,
         duplicateOf: true,
-        // The latest version, not currentVersion — currentVersion is the
-        // last *approved* file, which for a document sitting here because a
-        // new version was just uploaded (pending_review) or rejected is the
-        // previous, already-decided file, not the one actually awaiting a
-        // decision. See components/DocumentTable.tsx's `version` prop.
-        versions: { orderBy: { versionNumber: "desc" }, take: 1 },
-        reviewRequests: { select: { roundNumber: true, status: true, comments: true } },
+        // Every version, not just the latest — lib/versionRounds.ts's
+        // computeRoundAttempts (used below for each row's status-badge
+        // hover detail) needs the full history to correctly map each
+        // ReviewRequest round to its Round.Attempt label. Sorted
+        // newest-first so versions[0] is still the latest for the existing
+        // "which version is actually awaiting a decision" use below.
+        versions: { orderBy: { versionNumber: "desc" } },
+        // Only for building each row's status-badge hover detail (see
+        // statusDetail below) — never rendered directly, so this stays a
+        // lightweight select rather than the full round-history include the
+        // Review Status stepper needs.
+        reviewRequests: {
+          select: { roundNumber: true, status: true, comments: true, createdAt: true, reviewer: { select: { name: true } } },
+        },
       },
       orderBy: { updatedAt: "desc" },
     }),
@@ -86,6 +103,40 @@ export default async function ReviewDashboardPage({
 
   const rows: DocRow[] = docs.map((doc) => {
     const latestVersion = doc.versions[0];
+
+    // What's actually happening right now, for the status badge's hover
+    // detail — which round it's on, and who it's waiting on or was decided
+    // by. Only pending_review/rejected carry anything worth explaining;
+    // published/archived are already self-explanatory from the label alone.
+    let statusDetail: string | undefined;
+    if (doc.status === "pending_review" || doc.status === "rejected") {
+      const roundAttempts = computeRoundAttempts(
+        doc.versions.map((v) => ({ id: v.id, versionNumber: v.versionNumber, uploadedAt: v.uploadedAt })),
+        doc.reviewRequests,
+        doc.revokedAt
+      );
+      const maxRoundNumber = doc.reviewRequests.length > 0 ? Math.max(...doc.reviewRequests.map((r) => r.roundNumber)) : null;
+      const round = maxRoundNumber !== null ? roundAttempts.byRoundNumber.get(maxRoundNumber)?.round ?? maxRoundNumber : null;
+      if (doc.status === "pending_review") {
+        const pendingReviewers = [...new Set(doc.reviewRequests.filter((r) => r.status === "pending").map((r) => r.reviewer.name))];
+        statusDetail =
+          round !== null
+            ? `Round ${round}, waiting on ${pendingReviewers.length > 0 ? pendingReviewers.join(", ") : "a reviewer"}.`
+            : undefined;
+      } else {
+        // The row that actually rejected it (not one auto-closed by a
+        // different reviewer's rejection — see app/api/documents/[id]/
+        // review/route.ts's reject handling), most recent first.
+        const rejectedBy = [...doc.reviewRequests]
+          .filter((r) => r.status === "rejected" && !r.comments?.startsWith("Auto-closed:"))
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+        statusDetail =
+          round !== null && rejectedBy
+            ? `Round ${round}, rejected by ${rejectedBy.reviewer.name}${rejectedBy.comments ? `: "${rejectedBy.comments}"` : "."}`
+            : undefined;
+      }
+    }
+
     return {
       id: doc.id,
       title: doc.title,
@@ -101,7 +152,7 @@ export default async function ReviewDashboardPage({
       hasPreviewPdf: Boolean(latestVersion?.previewPdfPath),
       version: latestVersion?.versionNumber,
       externalUrl: doc.externalUrl,
-      reviewRounds: doc.reviewRequests.map((r) => ({ roundNumber: r.roundNumber, status: r.status, comments: r.comments })),
+      statusDetail,
     };
   });
 
@@ -113,15 +164,22 @@ export default async function ReviewDashboardPage({
     return qs ? `/dashboard/pending?${qs}` : "/dashboard/pending";
   };
 
-  const SUBTITLES: Record<string, string> = {
-    pending_review: isReviewer ? "Documents awaiting an approve/reject decision." : "Your submissions that are still awaiting review.",
-    rejected: isReviewer ? "Submissions sent back with feedback." : "Your submissions that were sent back with feedback.",
-    archived: "Documents retired from the public dashboard.",
-  };
+  const SUBTITLES: Record<string, string> =
+    user.role === "superadmin"
+      ? {
+          pending_review: "Every document across the org awaiting an approve/reject decision.",
+          rejected: "Every submission across the org sent back with feedback.",
+          archived: "Every document retired from the public dashboard.",
+        }
+      : {
+          pending_review: isReviewer ? "Documents awaiting an approve/reject decision." : "Your submissions that are still awaiting review.",
+          rejected: isReviewer ? "Submissions sent back with feedback." : "Your submissions that were sent back with feedback.",
+          archived: "Documents retired from the public dashboard.",
+        };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Review Dashboard</h1>

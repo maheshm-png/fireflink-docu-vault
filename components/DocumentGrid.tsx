@@ -1,15 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, Copy, ExternalLink } from "lucide-react";
+import { AlertTriangle, Copy, ExternalLink, Clock, Info } from "lucide-react";
 import DocTypeIcon from "./DocTypeIcon";
 import DocumentPreview from "./DocumentPreview";
 import DownloadMenu from "./DownloadMenu";
 import LiveNewDocBadge from "./LiveNewDocBadge";
 import { type DocRow, StatusBadge, EmptyDocuments } from "./DocumentTable";
-import { formatDateTime } from "@/lib/formatDate";
+import { LocalDateTime } from "./LocalDateTime";
+import Badge from "./Badge";
 
-export default function DocumentGrid({ rows, hasFilters = false }: { rows: DocRow[]; hasFilters?: boolean }) {
+export default function DocumentGrid({
+  rows,
+  hasFilters = false,
+}: {
+  rows: DocRow[];
+  hasFilters?: boolean;
+}) {
   if (rows.length === 0) {
     return <EmptyDocuments hasFilters={hasFilters} />;
   }
@@ -41,13 +48,29 @@ export default function DocumentGrid({ rows, hasFilters = false }: { rows: DocRo
                   />
                 </span>
               )}
+              {doc.note && (
+                <span title={doc.note}>
+                  <Info className="h-4 w-4 shrink-0 text-ff-textMuted" aria-label={doc.note} />
+                </span>
+              )}
             </div>
           </div>
 
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <p className="line-clamp-2 font-medium text-ff-text">{doc.title}</p>
               <LiveNewDocBadge documentId={doc.id} className="shrink-0" />
+              {doc.hasPendingApproval && (
+                <Badge
+                  variant="warning"
+                  solid
+                  pulse
+                  icon={<Clock className="h-3 w-3" aria-hidden />}
+                  tooltip="A new version is waiting for approval"
+                >
+                  Pending Approval
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-ff-textMuted">{doc.categoryName}</p>
           </div>
@@ -57,7 +80,7 @@ export default function DocumentGrid({ rows, hasFilters = false }: { rows: DocRo
             <span className="truncate text-xs text-ff-textMuted">{doc.uploadedByName}</span>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-ff-textMuted">Updated {formatDateTime(doc.updatedAt)}</p>
+            <p className="text-xs text-ff-textMuted">Updated <LocalDateTime value={doc.updatedAt} /></p>
             {(doc.hasCurrentVersion !== false || doc.externalUrl) && (
               <div className="flex items-center gap-0.5">
                 <DocumentPreview

@@ -111,6 +111,43 @@ html, body {
   animation: introFadeOut 0.6s ease-in forwards;
 }
 
+/* Big background brand mark on plum panels (components/PlumWatermark.tsx).
+   Its dim fill is always visible (plain opacity, no animation — that part
+   must never distract from foreground text). This animation drives the
+   occasional "spark": a bright line runs once around each shape's own
+   outline (stroke-dasharray "14 86" on a pathLength=100 path means a
+   segment covering 14% of its edge chases around it as dashoffset counts
+   down from 100 to 0), then eases back out slowly rather than cutting off.
+   The long 0-70% idle hold before any of that starts is deliberate: a
+   constant glow would compete with foreground text, an occasional one
+   reads as a quiet brand detail instead. */
+@keyframes plumWatermarkTrace {
+  0%, 70% {
+    opacity: 0;
+    stroke-dashoffset: 100;
+  }
+  74% {
+    opacity: 1;
+  }
+  84% {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+  92.5% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+}
+
+.plum-watermark-trace {
+  stroke-dasharray: 14 86;
+  animation: plumWatermarkTrace 9s ease-in-out infinite;
+}
+
 /* Keeps the sidebar nav (components/Navbar.tsx) scrollable when its item
    list overflows without showing a visible scrollbar track/thumb over the
    plum background. */

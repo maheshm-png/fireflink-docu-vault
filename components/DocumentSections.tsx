@@ -40,7 +40,11 @@ export default function DocumentSections({
             <ChevronDown className="h-4 w-4 shrink-0 text-ff-textMuted transition-transform group-open:rotate-180" aria-hidden />
           </summary>
           <div className="px-4 pb-4">
-            {view === "grid" ? <DocumentGrid rows={g.rows} /> : <DocumentTable rows={g.rows} />}
+            {view === "grid" ? (
+              <DocumentGrid rows={g.rows} />
+            ) : (
+              <DocumentTable rows={g.rows} />
+            )}
           </div>
         </details>
       ))}

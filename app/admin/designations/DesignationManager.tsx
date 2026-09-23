@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Trash2, Pencil } from "lucide-react";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
+import ConfirmModal from "@/components/ConfirmModal";
 
 type Designation = { id: string; name: string; userCount: number };
 
@@ -30,7 +31,7 @@ export default function DesignationManager({ initialDesignations }: { initialDes
     setAdding(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not add this designation — please try again.");
+      setError(data?.error ?? "Could not add this designation, please try again.");
       return;
     }
     setName("");
@@ -49,7 +50,7 @@ export default function DesignationManager({ initialDesignations }: { initialDes
     setBusyId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not rename this designation — please try again.");
+      setError(data?.error ?? "Could not rename this designation, please try again.");
       return;
     }
     setEditingId(null);
@@ -63,7 +64,7 @@ export default function DesignationManager({ initialDesignations }: { initialDes
     setConfirmingId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not delete this designation — please try again.");
+      setError(data?.error ?? "Could not delete this designation, please try again.");
       return;
     }
     router.refresh();
@@ -134,52 +135,52 @@ export default function DesignationManager({ initialDesignations }: { initialDes
                     {d.userCount} {d.userCount === 1 ? "person" : "people"}
                   </span>
                 </div>
-                {confirmingId === d.id ? (
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-ff-textMuted">Delete?</span>
-                    <button
-                      onClick={() => remove(d.id)}
-                      disabled={busyId === d.id}
-                      className="flex items-center justify-center rounded-ff bg-ff-danger px-2.5 py-1 text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                    >
-                      {busyId === d.id ? <BrandedLoader size={12} variant="white" /> : "Yes"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmingId(null)}
-                      disabled={busyId === d.id}
-                      className="rounded-ff border border-ff-border px-2.5 py-1 text-ff-text hover:bg-ff-lavender"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setEditingId(d.id);
-                        setEditValue(d.name);
-                      }}
-                      title="Edit"
-                      aria-label="Edit"
-                      className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden />
-                    </button>
-                    <button
-                      onClick={() => setConfirmingId(d.id)}
-                      title="Delete"
-                      aria-label="Delete"
-                      className="rounded p-1.5 text-ff-textMuted transition-colors hover:border-ff-danger/40 hover:bg-ff-danger/10 hover:text-ff-danger"
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setEditingId(d.id);
+                      setEditValue(d.name);
+                    }}
+                    title="Edit"
+                    aria-label="Edit"
+                    className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden />
+                  </button>
+                  <button
+                    onClick={() => setConfirmingId(d.id)}
+                    title="Delete"
+                    aria-label="Delete"
+                    className="rounded p-1.5 text-ff-textMuted transition-colors hover:border-ff-danger/40 hover:bg-ff-danger/10 hover:text-ff-danger"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
               </>
             )}
           </div>
         ))}
       </div>
+
+      <ConfirmModal
+        open={confirmingId !== null}
+        title="Delete this designation?"
+        message={
+          confirmingId
+            ? (() => {
+                const d = initialDesignations.find((x) => x.id === confirmingId);
+                return d && d.userCount > 0
+                  ? `${d.userCount} ${d.userCount === 1 ? "person" : "people"} currently ${d.userCount === 1 ? "has" : "have"} this designation. This can't be undone.`
+                  : "This can't be undone.";
+              })()
+            : undefined
+        }
+        confirmLabel="Yes, delete"
+        danger
+        busy={busyId === confirmingId}
+        onConfirm={() => confirmingId && remove(confirmingId)}
+        onCancel={() => setConfirmingId(null)}
+      />
     </div>
   );
 }

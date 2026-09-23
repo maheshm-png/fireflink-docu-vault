@@ -13,7 +13,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 
 export const metadata = {
   title: "FireFlink Docu Vault",
-  description: "Case studies, competitor comparisons, demo videos — all in one place.",
+  description: "Case studies, competitor comparisons, demo videos, all in one place.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

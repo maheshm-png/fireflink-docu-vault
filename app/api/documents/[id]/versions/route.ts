@@ -5,7 +5,8 @@ import { buildStorageKey, uploadFile } from "@/lib/storage";
 import { extractText } from "@/lib/extract";
 import { convertToPdf, isConvertible } from "@/lib/officeConvert";
 import { logAudit } from "@/lib/audit";
-import { notifyManagerReviewNeeded } from "@/lib/notify";
+import { notifyManagerReviewNeeded, fireNotification } from "@/lib/notify";
+import { computeRoundAttempts } from "@/lib/versionRounds";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
 import { validateFileMatchesDocType } from "@/lib/fileTypeValidation";
 import crypto from "crypto";
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   );
   if (previousReviewers.length === 0) {
     return NextResponse.json(
-      { error: "Could not find any active reviewers from the previous round to send this to — ask a manager to reassign a reviewer first." },
+      { error: "Could not find any active reviewers from the previous round to send this to, ask a manager to reassign a reviewer first." },
       { status: 400 }
     );
   }
@@ -181,22 +182,41 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 
   await logAudit({ userId: user.id, action: "upload", documentId: doc.id, documentTitle: doc.title });
+
+  // The label for the version just created above — doc.versions (fetched
+  // before this upload) doesn't include it yet, and reviewRequest.createMany
+  // doesn't return the rows it created, so both need a fresh read of what
+  // this upload itself just wrote.
+  const labelReviewRequests = await prisma.reviewRequest.findMany({
+    where: { documentId: doc.id },
+    select: { roundNumber: true, status: true, comments: true, createdAt: true },
+  });
+  const versionLabel = computeRoundAttempts(
+    [...doc.versions, version].map((v) => ({ id: v.id, versionNumber: v.versionNumber, uploadedAt: v.uploadedAt })),
+    labelReviewRequests,
+    doc.revokedAt
+  ).byVersionId.get(version.id)?.label;
+
   // Deliberately no whole-team notification here — see lib/notify.ts:
   // routine pre-publish status doesn't reach the shared channels. Each
   // reassigned reviewer still gets a targeted action-item alert, though.
-  for (const reviewer of previousReviewers) {
-    await notifyManagerReviewNeeded({
-      documentTitle: doc.title,
-      documentId: doc.id,
-      categoryName: doc.category.name,
-      uploaderName: user.name,
-      reviewerId: reviewer.id,
-      reviewerName: reviewer.name,
-      reviewerEmail: reviewer.email,
-      isNewVersion: true,
-      versionNumber: nextVersionNumber,
-    });
-  }
+  fireNotification(
+    Promise.all(
+      previousReviewers.map((reviewer) =>
+        notifyManagerReviewNeeded({
+          documentTitle: doc.title,
+          documentId: doc.id,
+          categoryName: doc.category.name,
+          uploaderName: user.name,
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+          reviewerEmail: reviewer.email,
+          isNewVersion: true,
+          versionLabel,
+        })
+      )
+    )
+  );
 
   // { id, versionNumber } only — the full record has fileSize as a
   // Prisma BigInt, which NextResponse.json() can't JSON-stringify.

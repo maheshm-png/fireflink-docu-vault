@@ -60,7 +60,7 @@ export default function DownloadMenu({
   // version only, same restriction the download route itself enforces),
   // the menu groups its format choices under each version instead of just
   // offering PDF/Original for whichever single `version` was passed.
-  versions?: { versionNumber: number; hasPreviewPdf: boolean }[];
+  versions?: { versionNumber: number; label: string; hasPreviewPdf: boolean }[];
   currentVersionNumber?: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -189,7 +189,7 @@ export default function DownloadMenu({
                 .map((v, i) => (
                   <div key={v.versionNumber} className={i > 0 ? "mt-1 border-t border-ff-border pt-1" : ""}>
                     <p className="px-3 py-1 text-xs font-semibold text-ff-textMuted">
-                      v{v.versionNumber}
+                      {v.label}
                       {v.versionNumber === currentVersionNumber && (
                         <span className="ml-1 font-normal text-ff-success">(current)</span>
                       )}

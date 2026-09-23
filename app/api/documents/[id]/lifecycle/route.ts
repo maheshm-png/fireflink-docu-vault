@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { assertCan } from "@/lib/rbac";
 import { logAudit } from "@/lib/audit";
 import { indexDocument } from "@/lib/search";
+import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 
 // PATCH /api/documents/:id/lifecycle — manager-tier document-lifecycle
@@ -106,6 +107,22 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
       if (targetVersion.id === document.currentVersionId) {
         return NextResponse.json({ error: "That's already the current version" }, { status: 400 });
+      }
+
+      // A rejected (or still-undecided) version was never actually
+      // published — rolling back to it here would publish content nobody
+      // ever approved, sidestepping the review process entirely. Its
+      // history and comments stay visible in the Review tab either way;
+      // it just can never become the live version.
+      const [allVersions, allReviewRequests] = await Promise.all([
+        prisma.documentVersion.findMany({ where: { documentId: document.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
+        prisma.reviewRequest.findMany({ where: { documentId: document.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
+      ]);
+      if (!everApprovedVersionIds(allVersions, allReviewRequests, document.revokedAt).has(targetVersion.id)) {
+        return NextResponse.json(
+          { error: "That version was never approved, a rejected or still-pending version can't be set as current." },
+          { status: 400 }
+        );
       }
 
       const updated = await prisma.document.update({

@@ -1,11 +1,21 @@
 import nodemailer from "nodemailer";
+import { notifyGChatManager } from "./gchat";
 
 /**
- * App-level transactional email (invite/decision/new-version alerts) —
- * separate from Supabase Auth's own SMTP config, which lives in the
- * self-hosted Supabase stack and only covers Supabase's own emails
- * (invite-user, password reset). This is a different SMTP account/config,
- * even if in practice it ends up being the same mailbox.
+ * App-level transactional email (invite/decision/new-version alerts,
+ * password-reset OTPs) — separate from Supabase Auth's own SMTP config,
+ * which lives in the self-hosted Supabase stack and only covers Supabase's
+ * own emails. This is a different SMTP account/config, even if in practice
+ * it ends up being the same mailbox (docuvault@fireflink.com).
+ *
+ * Plain SMTP via nodemailer, authenticated with a Gmail App Password
+ * (myaccount.google.com/apppasswords on the docuvault@fireflink.com
+ * account, once 2-Step Verification is turned on for it) rather than an
+ * OAuth2 refresh token — no Google Cloud OAuth consent screen, no
+ * verification review, no Workspace admin/domain-wide-delegation approval,
+ * and no 7-day expiry to babysit. An App Password is a long-lived
+ * credential: it works until it's manually revoked or the account's
+ * password changes, not on any fixed schedule.
  *
  * Same no-op-if-unconfigured philosophy as lib/gchat.ts: an unset
  * SMTP_HOST means email sends silently do nothing rather than crash the
@@ -50,6 +60,26 @@ function renderFormalEmail(bodyHtml: string) {
   `;
 }
 
+// nodemailer sets `.code` to "EAUTH" specifically for a rejected
+// username/password (a revoked or rotated App Password, 2-Step
+// Verification turned off on the account, etc.) — the one failure mode
+// here that actually needs a human to act (mint a new App Password and
+// update SMTP_PASS) rather than just retry on its own. Every other code
+// (ECONNECTION, ETIMEDOUT, ...) is a transient network hiccup worth
+// leaving to retry on the next notification rather than paging anyone.
+function isAuthError(err: unknown): boolean {
+  return (err as { code?: string } | undefined)?.code === "EAUTH";
+}
+
+// Every notification email attempt fails identically once the App Password
+// has actually been revoked/rotated without updating SMTP_PASS — without
+// this, a single busy day (several approvals/uploads) would post the same
+// "email is broken" alert to the manager Chat space that many times. One
+// alert per cold start is enough to get someone to act; process restarts
+// (a deploy, a crash recovery) are the only time this repeats, which is an
+// acceptable/rare re-notify.
+let hasAlertedForAuthFailure = false;
+
 /**
  * Everything in here is wrapped in one try/catch, including getTransporter()
  * — a malformed SMTP_* value (e.g. a non-numeric SMTP_PORT) can make
@@ -74,5 +104,16 @@ export async function sendEmail(params: { to: string; subject: string; html: str
     });
   } catch (err) {
     console.error(`Email send failed (to ${params.to}, subject "${params.subject}"):`, err);
+    if (isAuthError(err) && !hasAlertedForAuthFailure) {
+      hasAlertedForAuthFailure = true;
+      await notifyGChatManager(
+        [
+          "Action required: document notification emails have stopped",
+          "",
+          "SMTP authentication failed (SMTP_USER/SMTP_PASS rejected) — the Gmail App Password may have been revoked or rotated.",
+          "Generate a new one at https://myaccount.google.com/apppasswords on the sending account, then update SMTP_PASS and restart the app.",
+        ].join("\n")
+      );
+    }
   }
 }

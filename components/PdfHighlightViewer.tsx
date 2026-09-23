@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, Maximize2, Minimize2, Pencil, X } from "lucide-react";
+import { Trash2, Maximize2, Minimize2, Pencil, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 // Type-only — erased entirely at compile time, so this doesn't trigger the
 // browser-only-globals problem the actual (dynamic, runtime) import below
@@ -15,6 +15,13 @@ export type PdfPanelItem = {
   comment: string;
   authorId: string;
   authorLabel?: string;
+  // A short round/attempt tag shown as its own pill next to authorLabel in
+  // the active-comment popover (e.g. "v1.1") — kept structured rather than
+  // appended into authorLabel as free text (the previous "Name · Round N"
+  // format this replaced had to be split back apart with a string search
+  // to render as a separate pill, which broke silently if the format ever
+  // changed on just one end).
+  roundLabel?: string;
   canDelete: boolean;
   // Whether the CURRENT viewer can edit this item's text — see
   // components/HighlightCommentPanel.tsx's PanelItem for why this is its
@@ -151,6 +158,7 @@ export default function PdfHighlightViewer({
   description,
   readOnly = false,
   focusRequest,
+  collapsible = false,
 }: {
   documentId: string;
   version?: number;
@@ -169,6 +177,13 @@ export default function PdfHighlightViewer({
   // rendering path.
   readOnly?: boolean;
   focusRequest?: { id: string; nonce: number } | null;
+  // Adds a collapse/expand toggle next to the fullscreen button, for a
+  // caller whose page already has several large sections stacked (see
+  // components/InlineCommentReview.tsx) where this one's full document
+  // render isn't always what someone wants sitting open. Off by default —
+  // components/ReviewHighlightsViewer.tsx's read-only view stays exactly
+  // as before.
+  collapsible?: boolean;
 }) {
   const [items, setItems] = useState<PdfPanelItem[]>(initialItems);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -190,13 +205,55 @@ export default function PdfHighlightViewer({
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // The document's own background — sampled from its first rendered page's
+  // corner rather than assumed, so fullscreen's surrounding area matches
+  // instead of always being the same fixed lavender tint (most pages are
+  // white, but not all — a dark-themed slide export, a colored letterhead).
+  const [bgColor, setBgColor] = useState<string | null>(null);
 
   const [fullscreen, setFullscreen] = useState(false);
+  // Starts expanded either way — collapsible only adds the option to tuck
+  // this section away, it shouldn't hide it by default.
+  const [collapsed, setCollapsed] = useState(false);
+  // Same floating "collapse" pill as app/dashboard/documents/[id]/
+  // ReviewTrailWithHighlights.tsx's Reviewer Highlights panel — this
+  // section's rendered document can run long, so the header's own collapse
+  // button (up at the top) is out of reach once scrolled down into it. Only
+  // shown while actively scrolling (plus a brief hold after), not
+  // permanently, for the same reason that component gives: a fixed icon
+  // sitting in the corner the whole time reads as unrelated chrome.
+  const [showFloatingCollapse, setShowFloatingCollapse] = useState(false);
+  const hideFloatingCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!collapsible || collapsed) return;
+    function onWindowScroll() {
+      setShowFloatingCollapse(true);
+      if (hideFloatingCollapseTimer.current) clearTimeout(hideFloatingCollapseTimer.current);
+      hideFloatingCollapseTimer.current = setTimeout(() => setShowFloatingCollapse(false), 1000);
+    }
+    document.addEventListener("scroll", onWindowScroll, true);
+    return () => {
+      document.removeEventListener("scroll", onWindowScroll, true);
+      if (hideFloatingCollapseTimer.current) clearTimeout(hideFloatingCollapseTimer.current);
+    };
+  }, [collapsible, collapsed]);
+  // Bumped on every scroll (capture-phase, so it catches scrolling on
+  // whatever ancestor actually scrolls — window outside fullscreen, or the
+  // section itself in fullscreen) purely to force a re-render, so
+  // activeOverlayScreenPos below keeps tracking the highlight's on-screen
+  // position live instead of only updating once some unrelated re-render
+  // happens to occur after a jumpToItem scroll finishes animating.
+  const [scrollTick, bumpScrollTick] = useState(0);
   const sectionRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<HTMLDivElement[]>([]);
   const pageIndicesRef = useRef<PageIndex[]>([]);
-  const overlayHostRefs = useRef<HTMLDivElement[]>([]);
+  // The actual rendered overlay <div> for each item's first rect — used by
+  // jumpToItem to scroll to the exact highlighted line via the browser's
+  // own scrollIntoView, rather than pageRefs (which only ever scrolls to
+  // wherever the page starts, which for a multi-highlight or tall page can
+  // land well above or below the actual line someone clicked).
+  const overlayElRefs = useRef<Record<string, HTMLElement | null>>({});
   // The loaded document + its module, kept across renders so toggling
   // fullscreen (or anything else that should re-fit the pages) can re-run
   // just the render step at the new size, instead of re-fetching and
@@ -318,6 +375,18 @@ export default function PdfHighlightViewer({
       if (!ctx) continue;
       await page.render({ canvasContext: ctx, viewport }).promise;
       if (renderGenRef.current !== myGen) return;
+
+      if (pageNum === 1) {
+        // First page's corner stands in for "the document's background" —
+        // its margin is almost always a uniform color.
+        try {
+          const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+          setBgColor(`rgb(${r}, ${g}, ${b})`);
+        } catch {
+          // Rare (a canvas the browser considers tainted) — falls back to
+          // the fixed neutral already used below when bgColor stays null.
+        }
+      }
 
       const textLayerDiv = document.createElement("div");
       textLayerDiv.className = "ff-pdf-textlayer";
@@ -516,13 +585,43 @@ export default function PdfHighlightViewer({
   function jumpToItem(id: string) {
     const overlay = overlays.find((o) => o.itemId === id);
     if (overlay) {
-      pageRefs.current[overlay.pageIndex]?.scrollIntoView({ block: "center", behavior: "smooth" });
+      const target = overlayElRefs.current[id] ?? pageRefs.current[overlay.pageIndex];
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
       setFlashedId(id);
       setTimeout(() => setFlashedId((cur) => (cur === id ? null : cur)), 1200);
     }
     setPendingSelection(null);
     setActiveItemId(id);
   }
+
+  // Reading order (top of the document to bottom), not whatever order the
+  // items happened to load in — otherwise "Next" wouldn't reliably move
+  // forward through the document. Only ever needed for the Prev/Next
+  // fullscreen nav below: outside fullscreen, the comment list this
+  // component's caller renders alongside it (e.g. ReviewTrail.tsx's
+  // "Document Comments") is the normal way to pick a specific one — that
+  // list becomes unreachable once fullscreen hides everything outside this
+  // component, which is what Prev/Next exists to replace.
+  const orderedItemIds = [...overlays]
+    .sort((a, b) => a.pageIndex - b.pageIndex || (a.rects[0]?.top ?? 0) - (b.rects[0]?.top ?? 0))
+    .map((o) => o.itemId);
+  const activeOrderedIndex = activeItemId ? orderedItemIds.indexOf(activeItemId) : -1;
+
+  // Clamps rather than wraps — jumping from the last comment back to the
+  // first (or vice versa) read as "did that just do nothing?" since
+  // there's no visual cue a wrap happened. Not wrapping also means Prev/
+  // Next can now honestly reflect whether there's really somewhere to go
+  // (hasPrevComment/hasNextComment below), instead of always being
+  // available whenever there's more than one comment.
+  function jumpRelative(direction: 1 | -1) {
+    if (orderedItemIds.length === 0) return;
+    const nextIndex = activeOrderedIndex === -1 ? (direction === 1 ? 0 : orderedItemIds.length - 1) : activeOrderedIndex + direction;
+    if (nextIndex < 0 || nextIndex >= orderedItemIds.length) return;
+    jumpToItem(orderedItemIds[nextIndex]);
+  }
+
+  const hasPrevComment = activeOrderedIndex > 0;
+  const hasNextComment = activeOrderedIndex !== -1 && activeOrderedIndex < orderedItemIds.length - 1;
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -545,11 +644,29 @@ export default function PdfHighlightViewer({
   // on `ready` since overlays don't exist yet until the PDF has actually
   // rendered, so a focus request arriving during that async load is retried
   // (via `ready` flipping true) rather than silently missing its target.
+  // Depending on `overlays` too (not just `ready`) matters: the moment
+  // `ready` first flips true, this effect and the one above that computes
+  // `overlays` both fire in the SAME commit, in the order they're
+  // declared — this one would run before `setOverlays` above has actually
+  // landed, so `jumpToItem` read a still-empty `overlays` and silently
+  // skipped the scroll (leaving activeItemId set but nothing visibly
+  // jumped to, until a second click re-fired this effect on a render
+  // where overlays actually existed). Reacting to `overlays` itself
+  // guarantees this runs again once they're really there.
   useEffect(() => {
     if (!focusRequest || !ready) return;
     jumpToItem(focusRequest.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusRequest?.id, focusRequest?.nonce, ready]);
+  }, [focusRequest?.id, focusRequest?.nonce, ready, overlays]);
+
+  // Capture-phase so this fires regardless of which ancestor is actually
+  // scrolling (window outside fullscreen, the section itself in
+  // fullscreen) — see activeOverlayScreenPos's own comment for why.
+  useEffect(() => {
+    const onScroll = () => bumpScrollTick((n) => n + 1);
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, []);
 
   const activeOverlay = activeItem ? overlays.find((o) => o.itemId === activeItem.id) : null;
   const activeOverlayScreenPos = useMemo(() => {
@@ -559,10 +676,26 @@ export default function PdfHighlightViewer({
     const pageRect = pageEl.getBoundingClientRect();
     const firstRect = activeOverlay.rects[0];
     if (!firstRect) return null;
-    return { top: pageRect.top + firstRect.top, left: pageRect.left + firstRect.left + firstRect.width / 2 };
-  }, [activeOverlay, overlays]);
+    const top = pageRect.top + firstRect.top;
+    return {
+      top,
+      bottom: top + firstRect.height,
+      left: pageRect.left + firstRect.left + firstRect.width / 2,
+      // Not enough room to grow upward without going off-screen (or, in
+      // practice, overlapping the very text it's meant to sit above) —
+      // grow downward from the highlight's bottom edge instead. 180px is a
+      // generous stand-in for the popover's actual height, which isn't
+      // knowable until after it renders.
+      flipBelow: top < 180,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOverlay, overlays, scrollTick]);
+
+  const activeAuthorName = activeItem?.authorLabel ?? "";
+  const activeAuthorRound = activeItem?.roundLabel ?? null;
 
   return (
+    <>
     <section
       ref={sectionRef}
       className={
@@ -577,16 +710,47 @@ export default function PdfHighlightViewer({
           <Icon className="h-4 w-4" aria-hidden />
           {heading}
         </h2>
-        <button
-          type="button"
-          onClick={toggleFullscreen}
-          title={fullscreen ? "Exit full screen" : "Full screen"}
-          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-          className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
-        >
-          {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </button>
+        <div className="flex items-center gap-1">
+          {collapsible && !fullscreen && (
+            <button
+              type="button"
+              onClick={() => {
+                // Closing any open popover before collapsing avoids it
+                // reappearing mispositioned on re-expand — its position is
+                // computed from a live DOM rect that goes stale the moment
+                // its element is display:none.
+                closePopovers();
+                setCollapsed((c) => !c);
+              }}
+              title={collapsed ? "Expand" : "Collapse"}
+              aria-label={collapsed ? "Expand" : "Collapse"}
+              aria-expanded={!collapsed}
+              className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
+            >
+              {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </button>
+          )}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={fullscreen ? "Exit full screen" : "Full screen"}
+              aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+              className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
+            >
+              {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* CSS-hidden, not unmounted, while collapsed — the PDF rendering
+          below attaches canvases directly to pageRefs' divs via pdf.js
+          outside React's own diffing, and the popover positioning effects
+          depend on scrollRef/pageRefs staying mounted; unmounting this on
+          collapse would lose that rendered state and require re-running the
+          whole load sequence on every re-expand. */}
+      <div className={collapsed ? "hidden" : ""}>
       <p className="mb-3 text-xs text-ff-textMuted">{description}</p>
 
       {loadError ? (
@@ -596,7 +760,7 @@ export default function PdfHighlightViewer({
           ref={scrollRef}
           className={
             fullscreen
-              ? "mb-3 overflow-auto rounded-ff border border-ff-border bg-ff-lavender/20 p-3"
+              ? "mb-3 overflow-auto rounded-ff border border-ff-border p-3"
               // No max-height/overflow here outside fullscreen — this used
               // to cap at 70vh with its own inner scrollbar, a second
               // nested scroll area inside the already-scrollable page
@@ -607,6 +771,7 @@ export default function PdfHighlightViewer({
               // VersionCompareFrame.tsx's comparison panels.
               : "mb-3 rounded-ff border border-ff-border bg-ff-lavender/20 p-3"
           }
+          style={fullscreen ? { backgroundColor: bgColor ?? "#F6ECF4" } : undefined}
         >
           {!ready && (
             <div className="flex h-64 items-center justify-center">
@@ -630,14 +795,19 @@ export default function PdfHighlightViewer({
                       {o.rects.map((r, ri) => (
                         <div
                           key={ri}
+                          ref={(el) => {
+                            if (ri === 0) overlayElRefs.current[o.itemId] = el;
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setPendingSelection(null);
                             setActiveItemId(o.itemId);
                           }}
-                          className={`ff-pdf-overlay absolute cursor-pointer rounded-sm bg-amber-200/25 transition-colors hover:bg-amber-300/35 ${
+                          className={`ff-pdf-overlay absolute cursor-pointer rounded-sm bg-[#00994D]/35 transition-all hover:bg-[#00994D]/50 hover:shadow-[0_0_6px_rgba(0,153,77,0.6)] ${
                             flashedId === o.itemId ? "ring-2 ring-ff-accent" : ""
-                          } ${activeItemId === o.itemId ? "bg-amber-300/35" : ""}`}
+                          } ${
+                            activeItemId === o.itemId ? "bg-[#00994D]/50 shadow-[0_0_6px_rgba(0,153,77,0.6)]" : ""
+                          }`}
                           style={{ top: r.top, left: r.left, width: r.width, height: r.height }}
                         />
                       ))}
@@ -691,19 +861,88 @@ export default function PdfHighlightViewer({
 
       {activeItem && activeOverlayScreenPos && (
         <div
-          className="ff-pdf-popover fixed z-50 w-64 -translate-x-1/2 -translate-y-full rounded-ff border border-ff-border bg-white p-3 pr-7 shadow-ff-md"
-          style={{ top: activeOverlayScreenPos.top - 10, left: activeOverlayScreenPos.left }}
+          className="ff-pdf-popover fixed z-50 flex items-center gap-5"
+          style={{
+            top: activeOverlayScreenPos.flipBelow
+              ? activeOverlayScreenPos.bottom + 10
+              : activeOverlayScreenPos.top - 10,
+            left: activeOverlayScreenPos.left,
+            transform: activeOverlayScreenPos.flipBelow ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+          }}
         >
-          <button
-            type="button"
-            onClick={closePopovers}
-            title="Close"
-            aria-label="Close"
-            className="absolute right-1.5 top-1.5 rounded p-1 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden />
-          </button>
-          {activeItem.authorLabel && <p className="mb-1 text-xs font-medium text-ff-textMuted">{activeItem.authorLabel}</p>}
+          {/* Prev/Next float free of the message bubble itself, with a real
+              gap (gap-5 on the row below) so they never crowd its corners —
+              step-to-the-next-message controls, not part of the message.
+              Each side only renders when there's actually something in that
+              direction (hasPrevComment/hasNextComment — navigation no
+              longer wraps around, see jumpRelative's own comment) rather
+              than staying visible-but-clickless at either end. A colored
+              ring + accent icon (not plain white-on-white) keeps it visible
+              sitting over a page that's very often plain white too. */}
+          {hasPrevComment && (
+            <button
+              type="button"
+              onClick={() => jumpRelative(-1)}
+              title="Previous comment"
+              aria-label="Previous comment"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ff-accent/30 bg-white text-ff-accent shadow-ff-md transition-colors hover:bg-ff-accent hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+            </button>
+          )}
+
+          {/* The bubble itself — a chat-message card: avatar + reviewer
+              name up top (like an actual message sender), the comment text
+              below it, not a compact toolbar-style header with the name and
+              a counter crammed onto one line. rounded-ff (not a generic
+              rounded-2xl) to match the corner radius every other card in
+              this app uses, so this reads as part of the product rather
+              than a dropped-in chat-widget shape. */}
+          <div className="relative w-64 overflow-visible rounded-ff border border-ff-border bg-white shadow-ff-lg">
+            <div
+              aria-hidden
+              className={`absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-ff-border bg-[#EEDCEB] ${
+                activeOverlayScreenPos.flipBelow
+                  ? "-top-[5px] border-l border-t"
+                  : "-bottom-[5px] border-b border-r"
+              }`}
+            />
+            <div className="flex items-start gap-2.5 rounded-t-ff bg-[#EEDCEB] px-3.5 py-3">
+              <span
+                aria-hidden
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ff-accent-gradient text-xs font-semibold text-white shadow-ff"
+              >
+                {(activeAuthorName.trim().charAt(0) || "?").toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1 pt-0.5">
+                {activeAuthorName && (
+                  <p className="truncate text-sm font-semibold text-ff-plum">{activeAuthorName}</p>
+                )}
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  {activeAuthorRound && (
+                    <span className="shrink-0 rounded-full bg-white px-1.5 py-[1px] text-[10px] font-medium text-ff-accent">
+                      {activeAuthorRound}
+                    </span>
+                  )}
+                  {orderedItemIds.length > 1 && (
+                    <span className="shrink-0 text-[10px] text-ff-textMuted">
+                      Comment {activeOrderedIndex === -1 ? "?" : activeOrderedIndex + 1} of {orderedItemIds.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closePopovers}
+                title="Close"
+                aria-label="Close"
+                className="shrink-0 rounded p-1 text-ff-textMuted transition-colors hover:bg-white/60 hover:text-ff-text"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+
+            <div className="p-3.5">
           {editingItemId === activeItem.id ? (
             <>
               <input
@@ -737,9 +976,9 @@ export default function PdfHighlightViewer({
             </>
           ) : (
             <>
-              <p className="mb-2 text-sm text-ff-text">
+              <p className="mb-2 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ff-text">
                 {activeItem.comment}
-                {activeItem.editedAt && <span className="ml-1 text-xs italic text-ff-textMuted">(edited)</span>}
+                {activeItem.editedAt && <span className="ml-1.5 text-xs italic text-ff-textMuted">(edited)</span>}
               </p>
               {(activeItem.canEdit || activeItem.canDelete) && (
                 <div className="flex items-center gap-2 border-t border-ff-border pt-2">
@@ -767,6 +1006,20 @@ export default function PdfHighlightViewer({
               )}
             </>
           )}
+            </div>
+          </div>
+
+          {hasNextComment && (
+            <button
+              type="button"
+              onClick={() => jumpRelative(1)}
+              title="Next comment"
+              aria-label="Next comment"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ff-accent/30 bg-white text-ff-accent shadow-ff-md transition-colors hover:bg-ff-accent hover:text-white"
+            >
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            </button>
+          )}
         </div>
       )}
 
@@ -779,7 +1032,12 @@ export default function PdfHighlightViewer({
                 onClick={() => jumpToItem(item.id)}
                 className="w-full rounded-ff border border-ff-border p-2.5 text-left text-sm transition-colors hover:bg-ff-lavender/30"
               >
-                {item.authorLabel && <p className="mb-0.5 text-xs font-medium text-ff-textMuted">{item.authorLabel}</p>}
+                {item.authorLabel && (
+                  <p className="mb-0.5 text-xs font-medium text-ff-textMuted">
+                    {item.authorLabel}
+                    {item.roundLabel && ` · ${item.roundLabel}`}
+                  </p>
+                )}
                 {item.highlightedText && (
                   <p className="mb-0.5 truncate text-xs italic text-ff-textMuted">&ldquo;{item.highlightedText}&rdquo;</p>
                 )}
@@ -792,6 +1050,44 @@ export default function PdfHighlightViewer({
           ))}
         </ul>
       )}
+      </div>
+
     </section>
+
+    {/* Fixed to the viewport, same reasoning as ReviewTrailWithHighlights.tsx's
+        identical button: reachable from any scroll position regardless of
+        this section's own height, and immune to any overflow:hidden
+        ancestor a sticky element would get silently confined by. Only
+        actually visible while scrolling (showFloatingCollapse) — always
+        mounted so the opacity transition has something to animate, but
+        pointer-events-none while faded out so it never intercepts clicks
+        meant for whatever's underneath it. Not rendered at all in
+        fullscreen (nothing else to collapse back to while filling the
+        screen) or once already collapsed. */}
+    {collapsible && !collapsed && !fullscreen && (
+      <button
+        type="button"
+        onClick={() => {
+          closePopovers();
+          setCollapsed(true);
+        }}
+        onMouseEnter={() => {
+          if (hideFloatingCollapseTimer.current) clearTimeout(hideFloatingCollapseTimer.current);
+          setShowFloatingCollapse(true);
+        }}
+        onMouseLeave={() => {
+          hideFloatingCollapseTimer.current = setTimeout(() => setShowFloatingCollapse(false), 1000);
+        }}
+        aria-hidden={!showFloatingCollapse}
+        tabIndex={showFloatingCollapse ? 0 : -1}
+        className={`fixed bottom-5 right-5 z-30 flex items-center gap-1.5 rounded-full bg-ff-accent-gradient px-4 py-2.5 text-xs font-semibold text-white shadow-ff-lg transition-opacity duration-300 hover:brightness-105 ${
+          showFloatingCollapse ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+        Collapse {heading}
+      </button>
+    )}
+    </>
   );
 }

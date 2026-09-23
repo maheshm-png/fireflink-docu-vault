@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { AlertTriangle, FolderSearch, Copy, ExternalLink, Info } from "lucide-react";
+import { AlertTriangle, FolderSearch, Copy, ExternalLink, Info, Clock } from "lucide-react";
 import DocTypeIcon, { DOC_TYPE_LABEL } from "./DocTypeIcon";
 import DocumentPreview from "./DocumentPreview";
 import DownloadMenu from "./DownloadMenu";
 import LiveNewDocBadge from "./LiveNewDocBadge";
 import { LocalDateTime } from "./LocalDateTime";
+import Badge, { type BadgeVariant } from "./Badge";
 
 export type DocRow = {
   id: string;
@@ -36,27 +37,33 @@ export type DocRow = {
   // Set for docType "link" documents — no file/version ever exists for
   // these, so quick preview/download need to branch on this instead.
   externalUrl?: string | null;
-  // Per-round review progress (Review Dashboard only — app/dashboard/pending/
-  // page.tsx) — drives the ReviewMilestones step bar in place of the plain
-  // status pill for pending_review/rejected rows. Omitted everywhere else
-  // (Published Documents, Home grid), so those keep the plain StatusBadge.
-  reviewRounds?: { roundNumber: number; status: "pending" | "approved" | "rejected"; comments: string | null }[];
   // Short explanatory tag shown as a tooltip icon next to the title — e.g.
   // the revoke reason on app/dashboard/revoked/page.tsx.
   note?: string | null;
+  // Hover detail for the status badge itself — e.g. "Round 2, waiting on
+  // Manager Test" for a pending_review row (see app/dashboard/pending/
+  // page.tsx). Optional since only the Review Dashboard currently has this
+  // context to give.
+  statusDetail?: string;
   // Hides the download action for this row while keeping preview available —
   // used on the Revoked Documents page (app/dashboard/revoked/page.tsx) for
   // viewers who aren't a manager/superadmin/the document's uploader/owner:
   // revoked documents are viewable org-wide but not downloadable by them.
   hideDownload?: boolean;
+  // Set by app/dashboard/page.tsx (Published listing) for a manager/
+  // superadmin viewer (any document) or a contributor viewer (their own
+  // uploads only) — this row's prior approved content is what's actually
+  // shown/searched, but a NEW version is sitting in an active review round
+  // right now. Drives the blinking "New version awaiting approval" badge.
+  hasPendingApproval?: boolean;
 };
 
-export const STATUS_BADGE: Record<DocRow["status"], string> = {
-  published: "bg-ff-success/10 text-ff-success",
-  pending_review: "bg-ff-warning/10 text-ff-warning",
-  archived: "bg-ff-textMuted/10 text-ff-textMuted",
-  rejected: "bg-ff-danger/10 text-ff-danger",
-  revoked: "bg-ff-danger/10 text-ff-danger",
+export const STATUS_VARIANT: Record<DocRow["status"], BadgeVariant> = {
+  published: "success",
+  pending_review: "warning",
+  archived: "neutral",
+  rejected: "danger",
+  revoked: "danger",
 };
 
 export const STATUS_LABEL: Record<DocRow["status"], string> = {
@@ -67,84 +74,21 @@ export const STATUS_LABEL: Record<DocRow["status"], string> = {
   revoked: "Revoked",
 };
 
-export function StatusBadge({ status }: { status: DocRow["status"] }) {
-  return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[status]}`}>
-      {STATUS_LABEL[status]}
-    </span>
-  );
-}
-
-type MilestoneStage = "done" | "current" | "rejected" | "closed" | "upcoming";
-
-// A reviewer's row is force-set to "rejected" when a different reviewer
-// rejects first (see app/api/documents/[id]/review/route.ts) — that's not a
-// decision THEY made, so it shouldn't count as a real rejection here.
-function isAutoClosed(r: { status: string; comments: string | null }) {
-  return r.status === "rejected" && (r.comments?.startsWith("Auto-closed:") ?? false);
-}
-
-/** Delivery-tracker-style step bar: Uploaded → Round 1 → Round 2 (etc.) →
- * Published. Each round step reflects the ReviewRequest rows created for it
- * (see app/api/documents/[id]/review/route.ts's roundNumber) — approved once
- * every row in that round is approved, rejected if any row in it was, and
- * "current" (pulsing) while any row in it is still pending. Purely a visual
- * approximation of the real gating rule (a document only actually publishes
- * once EVERY pending row across every round is approved, not round-by-
- * round), but reads naturally as a left-to-right progress trail. */
-function ReviewMilestones({
-  rounds,
-  documentStatus,
+export function StatusBadge({
+  status,
+  detail,
 }: {
-  rounds: { roundNumber: number; status: "pending" | "approved" | "rejected"; comments: string | null }[];
-  documentStatus: DocRow["status"];
+  status: DocRow["status"];
+  // What's actually happening right now, shown on hover — e.g. which round
+  // it's on and who it's waiting on. Optional since most places this badge
+  // renders (Published Documents, Home grid) don't have that context to
+  // give; the Review Dashboard does (see app/dashboard/pending/page.tsx).
+  detail?: string;
 }) {
-  const maxRound = rounds.length > 0 ? Math.max(...rounds.map((r) => r.roundNumber)) : 1;
-
-  function roundStage(n: number): MilestoneStage {
-    const inRound = rounds.filter((r) => r.roundNumber === n);
-    if (inRound.some((r) => r.status === "rejected" && !isAutoClosed(r))) return "rejected";
-    if (inRound.length > 0 && inRound.every((r) => r.status === "approved")) return "done";
-    if (inRound.length > 0 && inRound.every((r) => isAutoClosed(r))) return "closed";
-    return "current";
-  }
-
-  const steps: { key: string; content: string; stage: MilestoneStage; label: string }[] = [
-    { key: "uploaded", content: "U", stage: "done", label: "Uploaded" },
-  ];
-  for (let n = 1; n <= maxRound; n++) {
-    steps.push({ key: `round-${n}`, content: String(n), stage: roundStage(n), label: `Round ${n} review` });
-  }
-  steps.push({
-    key: "published",
-    content: "P",
-    stage: documentStatus === "published" ? "done" : "upcoming",
-    label: "Published",
-  });
-
   return (
-    <div className="flex items-center" title={steps.map((s) => `${s.label}: ${s.stage}`).join(" → ")}>
-      {steps.map((s, i) => (
-        <div key={s.key} className="flex items-center">
-          <span
-            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
-              s.stage === "done"
-                ? "bg-ff-success text-white"
-                : s.stage === "current"
-                ? "animate-pulse bg-ff-accent text-white"
-                : s.stage === "rejected"
-                ? "bg-ff-danger text-white"
-                : "bg-ff-lavender text-ff-textMuted"
-            }`}
-          >
-            {s.stage === "done" ? "✓" : s.stage === "rejected" ? "✕" : s.stage === "closed" ? "–" : s.content}
-          </span>
-          {i < steps.length - 1 && (
-            <span className={`h-0.5 w-2.5 shrink-0 ${s.stage === "done" ? "bg-ff-success" : "bg-ff-border"}`} />
-          )}
-        </div>
-      ))}
-    </div>
+    <Badge variant={STATUS_VARIANT[status]} tooltip={detail}>
+      {STATUS_LABEL[status]}
+    </Badge>
   );
 }
 
@@ -165,7 +109,13 @@ export function EmptyDocuments({ hasFilters }: { hasFilters: boolean }) {
   );
 }
 
-export default function DocumentTable({ rows, hasFilters = false }: { rows: DocRow[]; hasFilters?: boolean }) {
+export default function DocumentTable({
+  rows,
+  hasFilters = false,
+}: {
+  rows: DocRow[];
+  hasFilters?: boolean;
+}) {
   if (rows.length === 0) {
     return <EmptyDocuments hasFilters={hasFilters} />;
   }
@@ -217,6 +167,17 @@ export default function DocumentTable({ rows, hasFilters = false }: { rows: DocR
                       {doc.title}
                     </Link>
                     <LiveNewDocBadge documentId={doc.id} className="shrink-0" />
+                    {doc.hasPendingApproval && (
+                      <Badge
+                        variant="warning"
+                        solid
+                        pulse
+                        icon={<Clock className="h-3 w-3" aria-hidden />}
+                        tooltip="A new version is waiting for approval"
+                      >
+                        Pending Approval
+                      </Badge>
+                    )}
                     {doc.isStale && (
                       <AlertTriangle
                         className="h-4 w-4 shrink-0 text-ff-warning"
@@ -243,11 +204,7 @@ export default function DocumentTable({ rows, hasFilters = false }: { rows: DocR
                 </td>
                 <td className="px-4 py-3 text-ff-textMuted">{DOC_TYPE_LABEL[doc.docType] ?? doc.docType}</td>
                 <td className="px-4 py-3">
-                  {doc.reviewRounds && (doc.status === "pending_review" || doc.status === "rejected") ? (
-                    <ReviewMilestones rounds={doc.reviewRounds} documentStatus={doc.status} />
-                  ) : (
-                    <StatusBadge status={doc.status} />
-                  )}
+                  <StatusBadge status={doc.status} detail={doc.statusDetail} />
                 </td>
                 <td className="px-4 py-3 text-ff-textMuted">
                   <span className="block truncate" title={doc.uploadedByName}>{doc.uploadedByName}</span>

@@ -5,6 +5,27 @@ import { sendEmail } from "./email";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 /**
+ * Every API route that triggers a notification (upload, approve/reject,
+ * reassign, feedback tagged/accepted, revoke, invite) already has its real
+ * work — the DB writes the response actually reports on — fully committed
+ * by the time it calls one of the functions below. Chat/email delivery
+ * itself is already fire-and-forget-safe (notifyGChat/notifyGChatManager
+ * and sendEmail swallow their own errors, see lib/gchat.ts and
+ * lib/email.ts), so there's nothing
+ * left for the caller to `await` except a slow or unreachable SMTP/Chat
+ * round-trip — which would otherwise sit directly in the user's request,
+ * making an upload or approval feel hung (or genuinely take 20s+) for a
+ * notification the user isn't even looking at yet. Callers pass the
+ * notify*() call in UNAWAITED (`fireNotification(notifyXxx(...))`) so the
+ * route can respond the moment its own work is done; this just catches
+ * whatever error handling inside notify*() didn't (a bug, not the normal
+ * path) so it never becomes an unhandled rejection.
+ */
+export function fireNotification(promise: Promise<unknown>) {
+  promise.catch((err) => console.error("Notification failed:", err));
+}
+
+/**
  * Notification policy (deliberately narrow): only three events reach the
  * team-wide Google Chat space —
  *   1. A document is published (notifyDocumentPublished)
@@ -29,6 +50,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 // InlineComment rows and passes them here. Deliberately batched into this
 // one decision-time notice rather than sent as they're added.
 export async function notifyReviewDecision(params: {
+  uploaderId: string;
   uploaderName: string;
   uploaderEmail: string;
   documentTitle: string;
@@ -52,6 +74,23 @@ export async function notifyReviewDecision(params: {
   }
   lines.push(`View: ${APP_URL}/dashboard/documents/${params.documentId}`);
   await notifyGChat(lines.join("\n"));
+
+  // The in-app bell entry this was previously missing entirely — a
+  // contributor whose upload was approved or rejected got an email and a
+  // team-wide GChat mention, but nothing in their own notification tab.
+  await createNotifications([
+    {
+      userId: params.uploaderId,
+      type: params.decision,
+      title:
+        params.decision === "approved"
+          ? `Approved and published: ${params.documentTitle}`
+          : `Sent back with feedback: ${params.documentTitle}`,
+      body: params.comments,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    },
+  ]);
 
   const decisionText =
     params.decision === "approved" ? "has been approved and is now published" : "has been returned for revision";
@@ -136,19 +175,22 @@ export async function notifyDocumentFlaggedStale(params: {
 export async function notifyDocumentRevoked(params: {
   documentTitle: string;
   documentId: string;
-  versionNumber?: number;
+  // A pre-computed "v1.1"-style Round.Attempt label (lib/versionRounds.ts),
+  // not a raw versionNumber — the caller already has versions+
+  // reviewRequests loaded to compute it, so this stays a plain string here.
+  versionLabel?: string;
   recipients: { id: string; name: string }[];
 }) {
-  const versionLabel = params.versionNumber ? ` (v${params.versionNumber})` : "";
+  const versionSuffix = params.versionLabel ? ` (${params.versionLabel})` : "";
   await notifyGChat(
-    `Document revoked: "${params.documentTitle}${versionLabel}". Please do not use this document — if you have already downloaded a copy, discontinue its use immediately.`
+    `Document revoked: "${params.documentTitle}${versionSuffix}". Please do not use this document, if you have already downloaded a copy, discontinue its use immediately.`
   );
   await createNotifications(
     params.recipients.map((r) => ({
       userId: r.id,
       type: "revoked" as const,
-      title: `Document revoked: ${params.documentTitle}${versionLabel}`,
-      body: "Please don't use this document — discontinue use of any copy you've already downloaded.",
+      title: `Document revoked: ${params.documentTitle}${versionSuffix}`,
+      body: "Please don't use this document, discontinue use of any copy you've already downloaded.",
       documentId: params.documentId,
       documentTitle: params.documentTitle,
     }))
@@ -183,10 +225,12 @@ export async function notifyManagerReviewNeeded(params: {
   reviewerName: string;
   reviewerEmail: string;
   isNewVersion: boolean;
-  versionNumber?: number;
+  // See notifyDocumentRevoked's own comment — a pre-computed label, not a
+  // raw versionNumber.
+  versionLabel?: string;
 }) {
   const submissionType = params.isNewVersion
-    ? `A new version (v${params.versionNumber})`
+    ? `A new version (${params.versionLabel})`
     : "A new document";
   await notifyGChatManager(
     [
@@ -206,7 +250,7 @@ export async function notifyManagerReviewNeeded(params: {
       userId: params.reviewerId,
       type: "new_version",
       title: params.isNewVersion
-        ? `New version to review: ${params.documentTitle} (v${params.versionNumber})`
+        ? `New version to review: ${params.documentTitle} (${params.versionLabel})`
         : `New document to review: ${params.documentTitle}`,
       body: `Submitted by ${params.uploaderName}`,
       documentId: params.documentId,
@@ -287,7 +331,9 @@ export async function notifyReviewerAssigned(params: {
 export async function notifyNewVersionAvailable(params: {
   documentTitle: string;
   documentId: string;
-  versionNumber: number;
+  // See notifyDocumentRevoked's own comment — a pre-computed label, not a
+  // raw versionNumber.
+  versionLabel: string;
   recipients: { email: string; name: string }[];
 }) {
   await Promise.all(
@@ -297,7 +343,7 @@ export async function notifyNewVersionAvailable(params: {
         subject: `New Version Available: ${params.documentTitle}`,
         html: `
           <p>Dear ${r.name},</p>
-          <p>A new version (Version ${params.versionNumber}) of "<strong>${params.documentTitle}</strong>" is now available. Please note that the copy you previously downloaded may no longer be current.</p>
+          <p>A new version (${params.versionLabel}) of "<strong>${params.documentTitle}</strong>" is now available. Please note that the copy you previously downloaded may no longer be current.</p>
           <p>We recommend downloading the latest version at your earliest convenience.</p>
           <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Latest Version</a></p>
         `,
@@ -308,7 +354,9 @@ export async function notifyNewVersionAvailable(params: {
 
 export async function notifyManagerRetentionAlert(params: {
   purgedDeletedDocs: { title: string }[];
-  purgedVersions: { documentTitle: string; versionNumber: number }[];
+  // versionLabel: see notifyDocumentRevoked's own comment — a pre-computed
+  // label, not a raw versionNumber.
+  purgedVersions: { documentTitle: string; versionLabel: string }[];
 }) {
   if (params.purgedDeletedDocs.length === 0 && params.purgedVersions.length === 0) return;
 
@@ -320,7 +368,63 @@ export async function notifyManagerRetentionAlert(params: {
   }
   if (params.purgedVersions.length > 0) {
     lines.push(`Removed ${params.purgedVersions.length} outdated file version(s) older than 1 year (superseded, not the current version):`);
-    lines.push(...params.purgedVersions.map((v) => `- ${v.documentTitle} (v${v.versionNumber})`));
+    lines.push(...params.purgedVersions.map((v) => `- ${v.documentTitle} (${v.versionLabel})`));
   }
   await notifyGChatManager(lines.join("\n"));
+}
+
+// A manager or the document's own uploader accepted a piece of feedback
+// (app/api/documents/[id]/feedback/[feedbackId]/route.ts's status handling,
+// FeedbackManagement.tsx) — tells the person who originally left it that
+// their input was acted on. In-app bell only, not the team-wide GChat space
+// or email: this is a per-comment courtesy to one specific person, not a
+// document-lifecycle event on the narrow list this file's header comment
+// describes.
+export async function notifyFeedbackAccepted(params: {
+  documentTitle: string;
+  documentId: string;
+  authorId: string;
+  acceptedByName: string;
+  // Optional reply left alongside the accept decision — see
+  // DocumentFeedback.responseNote's own schema comment.
+  responseNote?: string | null;
+}) {
+  await createNotifications([
+    {
+      userId: params.authorId,
+      type: "feedback_accepted",
+      title: `Your feedback was accepted: ${params.documentTitle}`,
+      body: params.responseNote
+        ? `${params.acceptedByName}: ${params.responseNote}`
+        : `${params.acceptedByName} accepted your feedback.`,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    },
+  ]);
+}
+
+// Someone left feedback and tagged a specific person already involved with
+// the document — its contributor, or one of its reviewers (see
+// components/DocumentFeedback.tsx's tag picker and app/api/documents/[id]/
+// feedback/route.ts's own validation that the tag target is actually one of
+// those two things, not an arbitrary user). Same in-app-only scope as
+// notifyFeedbackAccepted above — a courtesy ping to one person, not a
+// document-lifecycle event.
+export async function notifyFeedbackTagged(params: {
+  documentTitle: string;
+  documentId: string;
+  taggedUserId: string;
+  authorName: string;
+  comment: string;
+}) {
+  await createNotifications([
+    {
+      userId: params.taggedUserId,
+      type: "feedback_tagged",
+      title: `${params.authorName} tagged you in feedback: ${params.documentTitle}`,
+      body: params.comment,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    },
+  ]);
 }

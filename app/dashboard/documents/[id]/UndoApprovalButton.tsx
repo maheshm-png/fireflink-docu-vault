@@ -29,7 +29,7 @@ export default function UndoApprovalButton({
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Could not undo your approval — please try again.");
+      setError(data?.error ?? "Could not undo your approval, please try again.");
       return;
     }
     setConfirming(false);
@@ -56,7 +56,7 @@ export default function UndoApprovalButton({
         open={confirming}
         title="Undo your approval?"
         message="Your review goes back to pending. You'll need to approve or reject again before this document can publish."
-        confirmLabel="Undo Approval"
+        confirmLabel="Yes, undo"
         danger
         busy={busy}
         onConfirm={undo}

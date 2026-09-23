@@ -3,7 +3,8 @@ import { getCurrentUser } from "@/lib/supabase";
 import { assertCan } from "@/lib/rbac";
 import { removeFromIndex } from "@/lib/search";
 import { logAudit } from "@/lib/audit";
-import { notifyDocumentRevoked, notifyManagerReviewNeeded } from "@/lib/notify";
+import { notifyDocumentRevoked, notifyManagerReviewNeeded, fireNotification } from "@/lib/notify";
+import { computeRoundAttempts } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 
 // POST /api/documents/:id/revoke — manager pulls a published doc down.
@@ -83,30 +84,51 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   await logAudit({ userId: user.id, action: "revoke", documentId: document.id, documentTitle: document.title });
 
-  for (const reviewer of reviewers) {
-    if (!reviewer.name || !reviewer.email) continue;
-    await notifyManagerReviewNeeded({
-      documentTitle: document.title,
-      documentId: document.id,
-      categoryName: document.category.name,
-      uploaderName: user.name,
-      reviewerId: reviewer.id,
-      reviewerName: reviewer.name,
-      reviewerEmail: reviewer.email,
-      isNewVersion: false,
-    });
-  }
+  fireNotification(
+    Promise.all(
+      reviewers
+        .filter((reviewer) => reviewer.name && reviewer.email)
+        .map((reviewer) =>
+          notifyManagerReviewNeeded({
+            documentTitle: document.title,
+            documentId: document.id,
+            categoryName: document.category.name,
+            uploaderName: user.name,
+            reviewerId: reviewer.id,
+            reviewerName: reviewer.name!,
+            reviewerEmail: reviewer.email!,
+            isNewVersion: false,
+          })
+        )
+    )
+  );
 
   const recipients = await prisma.user.findMany({
     where: { isActive: true },
     select: { id: true, name: true },
   });
-  await notifyDocumentRevoked({
-    documentTitle: document.title,
-    documentId: document.id,
-    versionNumber: document.currentVersion?.versionNumber,
-    recipients,
-  });
+  let versionLabel: string | undefined;
+  if (document.currentVersion) {
+    const [labelVersions, labelReviewRequests] = await Promise.all([
+      prisma.documentVersion.findMany({ where: { documentId: document.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
+      prisma.reviewRequest.findMany({ where: { documentId: document.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
+    ]);
+    // document.revokedAt here is still the PRE-this-revoke value (document
+    // was fetched before the update above) — correct, since the version
+    // being revoked was already fully decided before this revoke happened,
+    // regardless of what revokedAt becomes after it.
+    versionLabel = computeRoundAttempts(labelVersions, labelReviewRequests, document.revokedAt).byVersionId.get(
+      document.currentVersion.id
+    )?.label;
+  }
+  fireNotification(
+    notifyDocumentRevoked({
+      documentTitle: document.title,
+      documentId: document.id,
+      versionLabel,
+      recipients,
+    })
+  );
 
   return NextResponse.json({ ok: true });
 }

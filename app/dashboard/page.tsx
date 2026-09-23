@@ -25,11 +25,23 @@ export default async function DashboardPage({
   // Categories for the tab strip, with a published-doc count per category
   // so users can see volume before clicking — fetched via Prisma directly
   // rather than the /api/categories route, since we need the groupBy too.
+  //
+  // Deliberately NOT `status: "published"` alone: a document that's already
+  // been published keeps its old approved content live and searchable
+  // (removeFromIndex is only ever called on revoke/archive — see those
+  // routes — never just for a new version going back to review), even while
+  // its status is temporarily "pending_review" (a new version was uploaded
+  // and is awaiting its own decision) or "rejected" (that new version got
+  // turned down, but the document's still-good prior version stays up).
+  // Counting only literal status "published" undercounts exactly those two
+  // cases — currentVersionId being set is what actually determines whether
+  // there's a live version to search/count, matching what the search index
+  // (used by the actual document list below) still shows.
   const [categories, counts] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.document.groupBy({
       by: ["categoryId"],
-      where: { status: "published", deletedAt: null },
+      where: { deletedAt: null, currentVersionId: { not: null }, status: { notIn: ["archived", "revoked"] } },
       _count: { _all: true },
     }),
   ]);
@@ -43,17 +55,6 @@ export default async function DashboardPage({
   // polls /api/notifications/new-documents from here on, so opening a
   // document actually clears its NEW badge/ticker entry without a refresh —
   // see components/NewDocumentsProvider.tsx.
-  const unreadPublishedNotifications = await prisma.notification.findMany({
-    where: { userId: user.id, type: "published", read: false },
-    orderBy: { createdAt: "desc" },
-    select: { documentId: true, documentTitle: true },
-  });
-  const newDocIds = unreadPublishedNotifications.map((n) => n.documentId).filter((id): id is string => id !== null);
-  const recentDocs = unreadPublishedNotifications
-    .slice(0, 5)
-    .filter((n): n is { documentId: string; documentTitle: string | null } => n.documentId !== null)
-    .map((n) => ({ id: n.documentId, title: n.documentTitle ?? "Untitled document" }));
-
   const filters: string[] = ['status = "published"'];
   if (searchParams.category) {
     // CategoryTabs passes the category id, but Meilisearch only has the
@@ -64,8 +65,23 @@ export default async function DashboardPage({
   if (searchParams.docType) filters.push(`docType = "${searchParams.docType}"`);
   if (searchParams.stale === "true") filters.push(`isStale = true`);
 
-  const results = await search(searchParams.q ?? "", filters);
+  // Independent of each other — neither needs the other's result.
+  const [unreadPublishedNotifications, results] = await Promise.all([
+    prisma.notification.findMany({
+      where: { userId: user.id, type: "published", read: false },
+      orderBy: { createdAt: "desc" },
+      select: { documentId: true, documentTitle: true },
+    }),
+    search(searchParams.q ?? "", filters),
+  ]);
+  const newDocIds = unreadPublishedNotifications.map((n) => n.documentId).filter((id): id is string => id !== null);
+  const recentDocs = unreadPublishedNotifications
+    .slice(0, 5)
+    .filter((n): n is { documentId: string; documentTitle: string | null } => n.documentId !== null)
+    .map((n) => ({ id: n.documentId, title: n.documentTitle ?? "Untitled document" }));
+
   let rows = results.hits as unknown as DocRow[];
+
   const categoryTabs = categories.map((c) => ({
     id: c.id,
     name: c.name,
@@ -82,15 +98,54 @@ export default async function DashboardPage({
   const schema = (selectedCategory?.formSchema as unknown as CategoryFormField[] | undefined) ?? [];
   const filterableFieldDefs = schema.filter((f) => f.type !== "textarea");
 
+  // Manager/superadmin see this for ANY document (a decision they can make);
+  // a contributor only sees it on their OWN uploads (something they're
+  // waiting on) — same split as the "Waiting for review"/"Under review"
+  // badge on the document detail page itself.
+  const wantsPendingApproval =
+    (user.role === "manager" || user.role === "superadmin" || user.role === "contributor") && rows.length > 0;
+  const wantsMetas = Boolean(selectedCategory) && rows.length > 0 && filterableFieldDefs.length > 0;
+
+  // Independent of each other — both only need the row ids already in hand
+  // from the search above — so they don't need to wait in sequence.
+  const [pendingApproval, metas] = await Promise.all([
+    wantsPendingApproval
+      ? prisma.document.findMany({
+          // Flags rows that look "published" here (the search index still
+          // shows their prior approved content — see app/dashboard/documents/
+          // [id]/page.tsx's isPubliclyVisible comment for why) but actually
+          // have a NEW version sitting in an active review round right now —
+          // worth a manager/reviewer's attention even while just browsing,
+          // without dragging them into full review mode the way opening the
+          // document itself would (see DocumentTable.tsx/DocumentGrid.tsx's
+          // blinking badge). Skipped entirely for anyone else — this is a
+          // manager-tier or own-upload heads-up, not a signal a base "user"
+          // viewer needs.
+          where: { id: { in: rows.map((r) => r.id) }, status: "pending_review", currentVersionId: { not: null } },
+          select: { id: true, uploadedById: true },
+        })
+      : Promise.resolve([]),
+    wantsMetas
+      ? prisma.document.findMany({
+          where: { id: { in: rows.map((r) => r.id) } },
+          select: { id: true, metadata: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  if (wantsPendingApproval) {
+    const isManagerTier = user.role === "manager" || user.role === "superadmin";
+    const pendingApprovalIds = new Set(
+      pendingApproval.filter((d) => isManagerTier || d.uploadedById === user.id).map((d) => d.id)
+    );
+    rows = rows.map((r) => ({ ...r, hasPendingApproval: pendingApprovalIds.has(r.id) }));
+  }
+
   let filterableFields: FilterableField[] = [];
   let domainGroups: { id: string; name: string; rows: DocRow[] }[] | null = null;
   let activeFieldFilterCount = 0;
 
-  if (selectedCategory && rows.length > 0 && filterableFieldDefs.length > 0) {
-    const metas = await prisma.document.findMany({
-      where: { id: { in: rows.map((r) => r.id) } },
-      select: { id: true, metadata: true },
-    });
+  if (wantsMetas && selectedCategory) {
     const metaById = new Map(metas.map((m) => [m.id, (m.metadata as Record<string, unknown>) ?? {}]));
     const displayValue = (v: unknown) => (typeof v === "boolean" ? (v ? "Yes" : "No") : String(v ?? ""));
 
@@ -138,7 +193,7 @@ export default async function DashboardPage({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <h1 className="mb-4 text-2xl font-bold tracking-tight text-ff-text">Published Documents</h1>

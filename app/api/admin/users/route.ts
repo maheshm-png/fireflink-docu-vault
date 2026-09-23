@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/supabase";
 import { assertCan } from "@/lib/rbac";
 import { logAudit } from "@/lib/audit";
 import { isAllowedEmailDomain, getAllowedEmailDomains } from "@/lib/emailPolicy";
+import { sendEmail } from "@/lib/email";
+import { fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
 
 // Service-role client — only ever used server-side, never shipped to the browser.
@@ -12,6 +14,8 @@ const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -26,8 +30,20 @@ export async function GET() {
   return NextResponse.json(users);
 }
 
-// POST /api/admin/users — superadmin invites a new user by email + role.
-// Sends a Supabase magic-link invite; user sets their own password.
+const MIN_PASSWORD_LENGTH = 8;
+
+// POST /api/admin/users — superadmin adds a new user by email + role.
+// Two ways in, chosen by whether `password` is present in the body:
+//   - Omitted (default, InviteUserForm.tsx's "Send Email Invite" mode):
+//     sends a Supabase magic-link invite; the user sets their own password
+//     from that email.
+//   - Provided (the "Set Password Directly" mode, for when that invite
+//     email never arrives, e.g. Supabase's own SMTP config being down or
+//     misconfigured, or just landing in spam): creates the account with
+//     that password immediately, `email_confirm: true` skipping Supabase's
+//     own confirmation email entirely, so the person can sign in right away
+//     with whatever the admin hands them directly (Slack, in person, phone)
+//     without either of them ever touching the database.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,9 +53,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }
 
-  const { email, name, role } = await req.json();
+  const { email, name, role, password } = await req.json();
   if (!email || !name || !role) {
     return NextResponse.json({ error: "email, name, and role are required" }, { status: 400 });
+  }
+  if (password !== undefined && (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH)) {
+    return NextResponse.json(
+      { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` },
+      { status: 400 }
+    );
   }
 
   if (!isAllowedEmailDomain(email)) {
@@ -51,24 +73,87 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Prevent duplicate invites for an email already in the system.
+  // An email already belonging to an ACTIVE user is a real duplicate.
+  // One belonging to a previously-removed (isActive: false) user isn't —
+  // "remove" is a soft deactivate (see PATCH .../users/[id]'s isActive
+  // branch), so that row, its Supabase Auth account, and every document
+  // they've ever uploaded/owned/reviewed are all still intact under the
+  // same User.id. Re-adding them here reactivates that same row instead of
+  // trying to create a brand-new one — which would otherwise either hit
+  // Prisma's unique-email constraint, or, worse, succeed with a different
+  // id and silently orphan their entire upload/review/dashboard history
+  // onto an account nothing points at anymore.
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    return NextResponse.json({ error: "A user with this email already exists." }, { status: 409 });
+    if (existing.isActive) {
+      return NextResponse.json({ error: "A user with this email already exists." }, { status: 409 });
+    }
+    // A password provided while reactivating also resets their Supabase
+    // Auth credential to it — the same "set it directly, hand it over
+    // yourself" escape hatch applies to bringing someone back, not just a
+    // first-time add.
+    if (password) {
+      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(existing.id, { password });
+      if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
+    }
+    const reactivated = await prisma.user.update({
+      where: { id: existing.id },
+      data: { name, role, isActive: true },
+    });
+    await logAudit({ userId: user.id, action: "restore_user", documentId: undefined });
+    return NextResponse.json({ user: reactivated }, { status: 200 });
   }
 
-  const { data: invited, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Email-invite mode deliberately never calls inviteUserByEmail — that
+  // sends its own email through Supabase Auth's own SMTP config (the
+  // self-hosted Supabase stack's, entirely separate from and unrelated to
+  // this app's own docuvault@fireflink.com setup in lib/email.ts). Using
+  // generateLink instead creates the same invited user and returns the
+  // same kind of action_link WITHOUT Supabase sending anything itself —
+  // this app then emails that link out through its own SMTP below, so
+  // every outbound email this app is responsible for goes through one
+  // config, one mailbox, one place to debug when it doesn't arrive.
+  let actionLink: string | null = null;
+  let invitedUserId: string;
+  if (password) {
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    invitedUserId = created.user.id;
+  } else {
+    const { data: generated, error } = await supabaseAdmin.auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { redirectTo: `${APP_URL}/accept-invite` },
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    invitedUserId = generated.user.id;
+    actionLink = generated.properties.action_link;
+  }
 
   const newUser = await prisma.user.create({
     data: {
-      id: invited.user.id,
+      id: invitedUserId,
       email,
       name,
       role,
       passwordHash: "", // Supabase Auth owns the credential; not stored here
     },
   });
+
+  if (actionLink) {
+    fireNotification(
+      sendEmail({
+        to: email,
+        subject: "You've been invited to FireFlink Docu Vault",
+        html: `
+          <p>Hello ${name},</p>
+          <p>You've been invited to FireFlink Docu Vault. Use the link below to set your password and sign in.</p>
+          <p><a href="${actionLink}">Accept Invite &amp; Set Password</a></p>
+          <p>If you weren't expecting this, you can ignore this email.</p>
+        `,
+      })
+    );
+  }
 
   await logAudit({ userId: user.id, action: "role_change", documentId: undefined });
 

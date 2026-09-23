@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { indexDocument } from "@/lib/search";
 import { logAudit } from "@/lib/audit";
-import { notifyReviewDecision, notifyDocumentPublished, notifyReviewerAssigned, notifyNewVersionAvailable } from "@/lib/notify";
+import { notifyReviewDecision, notifyDocumentPublished, notifyReviewerAssigned, notifyNewVersionAvailable, fireNotification } from "@/lib/notify";
+import { everApprovedVersionIds, computeRoundAttempts } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 
 // POST /api/documents/:id/review
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (action === "undo-approval") {
     if (document.status !== "pending_review") {
       return NextResponse.json(
-        { error: "This document has already moved past review — your approval can no longer be undone." },
+        { error: "This document has already moved past review, your approval can no longer be undone." },
         { status: 400 }
       );
     }
@@ -105,14 +106,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await logAudit({ userId: user.id, action: "reassign_review", documentId: document.id, documentTitle: document.title });
 
     const newReviewer = await prisma.user.findUniqueOrThrow({ where: { id: newReviewerId } });
-    await notifyReviewerAssigned({
-      documentTitle: document.title,
-      documentId: document.id,
-      reviewerId: newReviewerId,
-      reviewerName: newReviewer.name,
-      assignedByName: user.name,
-      reason: "reassigned",
-    });
+    fireNotification(
+      notifyReviewerAssigned({
+        documentTitle: document.title,
+        documentId: document.id,
+        reviewerId: newReviewerId,
+        reviewerName: newReviewer.name,
+        assignedByName: user.name,
+        reason: "reassigned",
+      })
+    );
 
     return NextResponse.json({ ok: true });
   }
@@ -123,9 +126,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: "Pick at least one reviewer to add." }, { status: 400 });
     }
     const uniqueIds = [...new Set(reviewerIds as string[])];
+    // Same rules as validateReassignTarget, but batched into one query
+    // instead of one prisma.user.findUnique per id — this list can be
+    // several reviewers at once.
     for (const id of uniqueIds) {
-      const error = await validateReassignTarget(id, document, user.id);
-      if (error) return NextResponse.json({ error }, { status: 400 });
+      if (typeof id !== "string" || !id) {
+        return NextResponse.json({ error: "A reviewer is required." }, { status: 400 });
+      }
+      if (id === user.id) {
+        return NextResponse.json({ error: "Pick someone other than yourself." }, { status: 400 });
+      }
+      if (id === document.uploadedById) {
+        return NextResponse.json(
+          { error: "That person uploaded this document and can't review their own submission." },
+          { status: 400 }
+        );
+      }
+    }
+    const targets = await prisma.user.findMany({ where: { id: { in: uniqueIds } } });
+    const targetById = new Map(targets.map((t) => [t.id, t]));
+    for (const id of uniqueIds) {
+      const target = targetById.get(id);
+      if (!target || !target.isActive || target.role !== "manager") {
+        return NextResponse.json({ error: "That person isn't an active manager." }, { status: 400 });
+      }
     }
     // Don't re-add someone who already has an active pending row for this
     // document (e.g. picked twice, or already reassigned in from before).
@@ -155,16 +179,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     const newReviewers = await prisma.user.findMany({ where: { id: { in: toAdd } } });
-    for (const r of newReviewers) {
-      await notifyReviewerAssigned({
-        documentTitle: document.title,
-        documentId: document.id,
-        reviewerId: r.id,
-        reviewerName: r.name,
-        assignedByName: user.name,
-        reason: "second_opinion",
-      });
-    }
+    fireNotification(
+      Promise.all(
+        newReviewers.map((r) =>
+          notifyReviewerAssigned({
+            documentTitle: document.title,
+            documentId: document.id,
+            reviewerId: r.id,
+            reviewerName: r.name,
+            assignedByName: user.name,
+            reason: "second_opinion",
+          })
+        )
+      )
+    );
     await logAudit({ userId: user.id, action: "request_second_opinion", documentId: document.id, documentTitle: document.title });
 
     return NextResponse.json({ ok: true, added: toAdd.length });
@@ -174,25 +202,31 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
-  const { decision, comments, announceToAll, allowFeedback, versionId } = body;
+  const { decision, comments, announceToAll, allowFeedback, shareEnabled, versionId } = body;
   if (!["approved", "rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
   if (decision === "approved" && typeof announceToAll !== "boolean") {
     return NextResponse.json(
-      { error: "announceToAll must be true or false — choose whether to notify all users before approving." },
+      { error: "announceToAll must be true or false, choose whether to notify all users before approving." },
       { status: 400 }
     );
   }
   if (decision === "approved" && typeof allowFeedback !== "boolean") {
     return NextResponse.json(
-      { error: "allowFeedback must be true or false — choose whether to accept feedback before approving." },
+      { error: "allowFeedback must be true or false, choose whether to accept feedback before approving." },
+      { status: 400 }
+    );
+  }
+  if (decision === "approved" && typeof shareEnabled !== "boolean") {
+    return NextResponse.json(
+      { error: "shareEnabled must be true or false, choose whether to allow sharing before approving." },
       { status: 400 }
     );
   }
   if (decision === "approved" && document.uploadedById === user.id) {
     return NextResponse.json(
-      { error: "You can't approve your own document — reassign it to another reviewer instead." },
+      { error: "You can't approve your own document, reassign it to another reviewer instead." },
       { status: 400 }
     );
   }
@@ -229,15 +263,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       select: { highlightedText: true, comment: true },
     });
 
-    await notifyReviewDecision({
-      uploaderName: rejected.uploadedBy.name,
-      uploaderEmail: rejected.uploadedBy.email,
-      documentTitle: rejected.title,
-      documentId: rejected.id,
-      decision: "rejected",
-      comments,
-      inlineComments,
-    });
+    fireNotification(
+      notifyReviewDecision({
+        uploaderId: rejected.uploadedById,
+        uploaderName: rejected.uploadedBy.name,
+        uploaderEmail: rejected.uploadedBy.email,
+        documentTitle: rejected.title,
+        documentId: rejected.id,
+        decision: "rejected",
+        comments,
+        inlineComments,
+      })
+    );
 
     return NextResponse.json({ document: { id: rejected.id, status: rejected.status } });
   }
@@ -269,6 +306,34 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const chosenVersion = await prisma.documentVersion.findFirstOrThrow({
         where: { id: versionId, documentId: params.id },
       });
+      // The picker offers every version, including ones from an earlier
+      // round that was REJECTED — nothing previously stopped one of those
+      // from being chosen here and getting published anyway, which is
+      // exactly backwards: a rejected version already failed review once,
+      // and picking it here would publish it without ever actually being
+      // approved. Only two kinds of version are legitimate to publish: one
+      // that's genuinely already been approved before (an intentional
+      // rollback), or the version this very round is deciding on right now.
+      const [allVersions, allReviewRequests] = await Promise.all([
+        prisma.documentVersion.findMany({ where: { documentId: params.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
+        prisma.reviewRequest.findMany({ where: { documentId: params.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
+      ]);
+      // Which version THIS round is actually deciding on — via the real
+      // round<->version mapping (lib/versionRounds.ts's computeRoundAttempts)
+      // rather than the old `sortedVersions[myRequest.roundNumber - 1]`
+      // position guess, which silently went out of bounds (or pointed at
+      // the wrong version) once a revoke had bumped roundNumber past the
+      // number of actual versions.
+      const thisRoundVersionId = computeRoundAttempts(allVersions, allReviewRequests, document.revokedAt).byRoundNumber.get(
+        myRequest.roundNumber
+      )?.versionId;
+      const approved = everApprovedVersionIds(allVersions, allReviewRequests, document.revokedAt);
+      if (chosenVersion.id !== thisRoundVersionId && !approved.has(chosenVersion.id)) {
+        return NextResponse.json(
+          { error: "That version was rejected in an earlier round and can't be published, pick the current or a previously-approved version instead." },
+          { status: 400 }
+        );
+      }
       currentVersionId = chosenVersion.id;
     } else {
       const latestVersion = await prisma.documentVersion.findFirstOrThrow({
@@ -285,10 +350,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       status: "published",
       lastReviewedAt: new Date(),
       feedbackEnabled: allowFeedback,
+      shareEnabled,
       ...(currentVersionId ? { currentVersionId } : {}),
     },
     include: { category: true, currentVersion: true, uploadedBy: true, duplicateOf: true },
   });
+
+  // Turning sharing off here (re-approving an already-shared document with
+  // a fresh "No" answer) deactivates any link already issued, same as the
+  // Manage-tab toggle (components/ShareSettings.tsx) does — otherwise a
+  // stale ShareLink row would sit there working while shareEnabled reads
+  // false everywhere else.
+  if (!shareEnabled) {
+    await prisma.shareLink.deleteMany({ where: { documentId: published.id } });
+  }
 
   await indexDocument({
     id: published.id,
@@ -316,15 +391,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     select: { highlightedText: true, comment: true },
   });
 
-  await notifyReviewDecision({
-    uploaderName: published.uploadedBy.name,
-    uploaderEmail: published.uploadedBy.email,
-    documentTitle: published.title,
-    documentId: published.id,
-    decision: "approved",
-    comments,
-    inlineComments,
-  });
+  fireNotification(
+    notifyReviewDecision({
+      uploaderId: published.uploadedById,
+      uploaderName: published.uploadedBy.name,
+      uploaderEmail: published.uploadedBy.email,
+      documentTitle: published.title,
+      documentId: published.id,
+      decision: "approved",
+      comments,
+      inlineComments,
+    })
+  );
 
   // Broadcast to the whole org on publish — separate from the uploader's
   // decision notice above, which they already got. Excludes the uploader
@@ -336,13 +414,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       where: { isActive: true, id: { not: published.uploadedById } },
       select: { id: true, name: true },
     });
-    await notifyDocumentPublished({
-      documentTitle: published.title,
-      documentId: published.id,
-      categoryName: published.category.name,
-      uploaderName: published.uploadedBy.name,
-      recipients,
-    });
+    fireNotification(
+      notifyDocumentPublished({
+        documentTitle: published.title,
+        documentId: published.id,
+        categoryName: published.category.name,
+        uploaderName: published.uploadedBy.name,
+        recipients,
+      })
+    );
   }
 
   // Separate from the announceToAll broadcast above — a targeted courtesy
@@ -359,12 +439,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       select: { user: { select: { email: true, name: true } } },
     });
     if (priorDownloaders.length > 0) {
-      await notifyNewVersionAvailable({
-        documentTitle: published.title,
-        documentId: published.id,
-        versionNumber: published.currentVersion.versionNumber,
-        recipients: priorDownloaders.map((d) => d.user),
-      });
+      const [labelVersions, labelReviewRequests] = await Promise.all([
+        prisma.documentVersion.findMany({ where: { documentId: published.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
+        prisma.reviewRequest.findMany({ where: { documentId: published.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
+      ]);
+      const versionLabel =
+        computeRoundAttempts(labelVersions, labelReviewRequests, published.revokedAt).byVersionId.get(published.currentVersion.id)
+          ?.label ?? `v${published.currentVersion.versionNumber}`;
+      fireNotification(
+        notifyNewVersionAvailable({
+          documentTitle: published.title,
+          documentId: published.id,
+          versionLabel,
+          recipients: priorDownloaders.map((d) => d.user),
+        })
+      );
     }
   }
 

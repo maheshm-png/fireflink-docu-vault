@@ -116,7 +116,7 @@ export default function AssistantChat() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Couldn't reach the AI assistant — check your connection and try again.", isError: true },
+        { role: "assistant", content: "Couldn't reach the AI assistant, check your connection and try again.", isError: true },
       ]);
     } finally {
       setLoading(false);
@@ -133,7 +133,7 @@ export default function AssistantChat() {
             <div>
               <p className="text-sm font-medium text-ff-text">Ask about anything in the Docu Vault</p>
               <p className="mt-1 text-xs text-ff-textMuted">
-                I&apos;ll only answer from documents actually in the hub — if nothing matches, I&apos;ll say so.
+                I&apos;ll only answer from documents actually in the hub, if nothing matches, I&apos;ll say so.
               </p>
             </div>
             <div className="flex flex-col gap-2">

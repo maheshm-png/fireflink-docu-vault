@@ -23,42 +23,98 @@ export function supabaseServer() {
   );
 }
 
+type CurrentUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  reportsToId: string | null;
+  designation: { name: string } | null;
+  team: { name: string } | null;
+  reportsTo: { name: string } | null;
+} | null;
+
+// Short-lived cross-request cache for getCurrentUser()'s result, keyed by
+// the session's access token — see that function's own comment for why
+// this exists. Module-scope Map survives across requests within this one
+// long-running Node process (this app isn't deployed serverless, so
+// there's exactly one of these, not one per invocation); a multi-instance
+// deployment would just get a lower hit rate per instance, never stale
+// data past AUTH_CACHE_TTL_MS.
+const userCache = new Map<string, { user: CurrentUser; expiresAt: number }>();
+const AUTH_CACHE_TTL_MS = 10_000;
+
 /**
  * Fetches the current authenticated user + their app role. Returns null if
- * not logged in. Every page starts with this call, so it's on the critical
- * path for every navigation — the identity check itself (auth.getUser())
- * has to stay a real network round-trip to Supabase Auth for security, but
- * the profile lookup right after it used to be a *second* round-trip
- * through Supabase's PostgREST layer. That's now a direct Prisma query
- * instead — same database, but through the app's already-open connection
- * pool (see lib/prisma.ts) rather than another HTTP+auth hop.
+ * not logged in. Every page AND every API route starts with this call, so
+ * it's on the critical path for every navigation and every poll (the
+ * notification bell alone hits this every 30s per signed-in user) — at
+ * real user counts, a full auth.getUser() network round-trip to Supabase
+ * Auth on every single one of those adds up to the dominant source of
+ * latency across the whole app, worse than any single slow page.
  *
- * Wrapped in React's cache() so if more than one Server Component in the
- * same request tree calls this (a page and a layout both needing the user,
- * say), the auth.getUser() network round-trip and the Prisma lookup happen
- * once per request, not once per caller.
+ * auth.getUser() itself still runs — this doesn't trust the cookie blindly,
+ * which is the real security property getUser() (over the purely-local
+ * getSession()) buys — but only once per distinct session per
+ * AUTH_CACHE_TTL_MS window, not once per request. A revoked/deactivated
+ * user's access dies within that same window rather than instantly; a 401
+ * a few seconds late is a reasonable trade for cutting the Auth server's
+ * request volume by roughly TTL/poll-interval. getSession() (fast, local
+ * JWT decode, refreshing the token if needed) still runs on every call
+ * regardless of cache state, just to read the access token as a cache key
+ * and to catch an actually-expired/missing session immediately.
+ *
+ * Wrapped in React's cache() on top of the Map above so multiple Server
+ * Components in the same request tree (a page and a layout both needing
+ * the user, say) share one lookup per request, same as before.
  */
-export const getCurrentUser = cache(async () => {
+export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
   const supabase = supabaseServer();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return null;
+
+  const cacheKey = session.access_token;
+  const cached = userCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.user;
+  }
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return null;
 
-  const profile = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      isActive: true,
-      reportsToId: true,
-      designation: { select: { name: true } },
-    },
-  });
+  let result: CurrentUser = null;
+  if (user) {
+    const profile = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isActive: true,
+        reportsToId: true,
+        designation: { select: { name: true } },
+        team: { select: { name: true } },
+        reportsTo: { select: { name: true } },
+      },
+    });
+    if (profile && profile.isActive) {
+      result = { ...profile, role: profile.role as Role };
+    }
+  }
 
-  if (!profile || !profile.isActive) return null;
+  // Evict anything else that's aged out while we're here, rather than
+  // running a separate timer — the map only ever holds as many entries as
+  // there are distinct active sessions within one TTL window, so this stays
+  // cheap even at real user counts.
+  const now = Date.now();
+  for (const [key, entry] of userCache) {
+    if (entry.expiresAt <= now) userCache.delete(key);
+  }
+  userCache.set(cacheKey, { user: result, expiresAt: now + AUTH_CACHE_TTL_MS });
 
-  return { ...profile, role: profile.role as Role };
+  return result;
 });

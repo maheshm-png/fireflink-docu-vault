@@ -81,6 +81,15 @@ model User {
   designationId String?
   designation   Designation? @relation(fields: [designationId], references: [id])
 
+  // Which team this person belongs to, e.g. "Engineering", "Sales" — picked
+  // from the admin-managed list below (app/admin/teams), independent of
+  // both role (what they're allowed to do) and reportsToId (who they
+  // report to): a real department grouping, not derived from either.
+  // Powers the grouping on app/admin/users (page.tsx groups by this
+  // instead of reportsToId).
+  teamId String?
+  team   Team? @relation(fields: [teamId], references: [id])
+
   uploadedDocuments   Document[]        @relation("UploadedBy")
   ownedDocuments      Document[]        @relation("OwnedBy")
   deletedDocuments    Document[]        @relation("DeletedBy")
@@ -95,12 +104,27 @@ model User {
   announcementsPosted Announcement[]
   shareLinksCreated   ShareLink[]
   inlineCommentsAuthored InlineComment[]
-  feedbackAuthored    DocumentFeedback[]
+  feedbackAuthored    DocumentFeedback[] @relation("FeedbackAuthor")
+  feedbackStatusChanged DocumentFeedback[] @relation("FeedbackStatusChangedBy")
+  feedbackTagged      DocumentFeedback[] @relation("FeedbackTaggedUser")
 }
 
 // Admin-managed job-title options for User.designation (app/admin/
 // designations) — superadmin adds/removes entries here; each User picks one
 // from this list rather than free-typing their own title.
+// Admin-managed team/department options for User.team (app/admin/teams) —
+// superadmin adds/removes entries here; each User picks one from this list
+// rather than free-typing their own. Separate from Designation (job title)
+// and from reportsToId (who they report to) — a person's team, title, and
+// manager are three independent facts about them.
+model Team {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  users User[]
+}
+
 model Designation {
   id        String   @id @default(uuid())
   name      String   @unique
@@ -208,6 +232,22 @@ model Document {
   // into.
   feedbackEnabled  Boolean    @default(false)
 
+  // Whether this document may be shared via a public "anyone with the link"
+  // link at all (components/ShareModal.tsx / app/api/documents/[id]/
+  // share/route.ts). Decided by the approving reviewer at publish time (the
+  // "share" radio in ReviewActions.tsx, alongside announceToAll/
+  // allowFeedback), and toggleable afterward from the Manage tab
+  // (components/ShareSettings.tsx) by a manager/superadmin or this
+  // document's own uploader, same permission as feedbackEnabled above.
+  // Turning it off also deactivates any share link already issued (see the
+  // PATCH handler) rather than merely blocking new ones, so a manager who
+  // decides sharing should stop actually stops it for anyone already
+  // holding the link. Defaults true (unlike feedbackEnabled's closed
+  // default) so every document published before this flag existed keeps
+  // working exactly as it did, sharing was unconditionally available for
+  // any published document until now.
+  shareEnabled     Boolean    @default(true)
+
   // Why a manager pulled this back down — required at revoke time (see
   // app/api/documents/[id]/revoke/route.ts and RevokeButton.tsx), shown
   // alongside the document wherever revoked docs are visible
@@ -306,8 +346,11 @@ model DocumentEvent {
   type       String   // "view" | "download"
   timestamp  DateTime @default(now())
 
-  @@index([documentId])
-  @@index([type])
+  // Every real query filters by BOTH fields together (a document's own
+  // preview route logging a view, the per-document activity page counting
+  // downloads) — two separate single-column indexes don't serve that
+  // combination as well as one composite covering it directly.
+  @@index([documentId, type])
 }
 
 model AuditLog {
@@ -326,6 +369,30 @@ model AuditLog {
 
   @@index([userId])
   @@index([timestamp])
+  // Queried directly by documentId on every approval (checking who
+  // previously downloaded the doc, to notify them of the new version) — an
+  // org-wide table logging every upload/download/login/role-change with no
+  // index on this column was a full scan every time.
+  @@index([documentId])
+}
+
+// One-time codes for self-service "forgot password" verification
+// (app/forgot-password) — the app owns this end to end rather than
+// depending on Supabase Auth's own recovery email (whose mailer template
+// lives in the self-hosted Supabase stack, outside this repo):
+// app/api/auth/forgot-password issues and emails the code (via
+// lib/email.ts), app/api/auth/reset-password verifies it and applies the
+// new password through Supabase's Admin API.
+model PasswordResetOtp {
+  id        String   @id @default(uuid())
+  email     String
+  codeHash  String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
 
 // Singleton row (id is always "singleton") holding org-wide, admin/manager-
@@ -368,7 +435,7 @@ model Notification {
   id            String   @id @default(uuid())
   user          User     @relation(fields: [userId], references: [id])
   userId        String
-  type          String   // "published" | "revoked" | "new_version"
+  type          String   // "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted"
   title         String
   body          String?
   documentId    String?
@@ -450,11 +517,17 @@ model InlineComment {
 // opted in (Document.feedbackEnabled) rather than being available by
 // default. highlightedText is null for a document with nothing extracted
 // to highlight, same fallback as InlineComment.
+enum FeedbackStatus {
+  open
+  accepted
+  closed
+}
+
 model DocumentFeedback {
   id              String   @id @default(uuid())
   document        Document @relation(fields: [documentId], references: [id])
   documentId      String
-  user            User     @relation(fields: [userId], references: [id])
+  user            User     @relation("FeedbackAuthor", fields: [userId], references: [id])
   userId          String
   highlightedText String?
   comment         String
@@ -464,6 +537,30 @@ model DocumentFeedback {
   // InlineComment.editedAt's own comment for why this is tracked rather
   // than silently overwriting.
   editedAt        DateTime?
+  // Triage state a manager or this document's own uploader can set from the
+  // Manage tab (app/dashboard/documents/[id]/FeedbackManagement.tsx) —
+  // "accepted" (acknowledged, will act on it) or "closed" (dismissed, no
+  // action) — separate from deleting it outright, so the feedback stays
+  // visible as a record either way. Defaults to open (untriaged).
+  status          FeedbackStatus @default(open)
+  // A short reply from whoever set the status above (the same manager or
+  // uploader, not the feedback's own author) — "here's what we did/why",
+  // shown alongside the status badge wherever the feedback itself is shown.
+  // Optional: a status can be set with no note at all.
+  responseNote    String?
+  // Who actually set the status above — shown as "Accepted by X (Role)"
+  // wherever the status badge shows, so the author knows not just THAT it
+  // was triaged but by whom (the document's contributor, or a manager/
+  // reviewer). Null while status is still "open" (nobody's acted on it yet).
+  statusChangedById String?
+  statusChangedBy   User?  @relation("FeedbackStatusChangedBy", fields: [statusChangedById], references: [id])
+  // Optionally directs this feedback at a specific person already involved
+  // with the document (its contributor, or one of its reviewers) — picked
+  // at compose time (components/DocumentFeedback.tsx) from a list scoped to
+  // just that document, not a free-text @mention of anyone. Null means
+  // general feedback, nobody tagged.
+  taggedUserId    String?
+  taggedUser      User?  @relation("FeedbackTaggedUser", fields: [taggedUserId], references: [id])
 
   @@index([documentId])
 }

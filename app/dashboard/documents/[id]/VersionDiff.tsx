@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { diffLines } from "diff";
 
-type VersionText = { versionNumber: number; extractedText: string };
+type VersionText = { versionNumber: number; label: string; extractedText: string };
 
 export default function VersionDiff({
   documentId,
@@ -18,6 +18,8 @@ export default function VersionDiff({
   const from = versions.find((v) => v.versionNumber === fromV)?.extractedText ?? "";
   const to = versions.find((v) => v.versionNumber === toV)?.extractedText ?? "";
   const parts = diffLines(from, to);
+  const fromLabel = versions.find((v) => v.versionNumber === fromV)?.label ?? `v${fromV}`;
+  const toLabel = versions.find((v) => v.versionNumber === toV)?.label ?? `v${toV}`;
 
   const hasContent = versions.some((v) => v.extractedText.trim().length > 0);
 
@@ -33,7 +35,7 @@ export default function VersionDiff({
             className="rounded-ff border border-ff-border px-2 py-1"
           >
             {versions.map((v) => (
-              <option key={v.versionNumber} value={v.versionNumber}>v{v.versionNumber}</option>
+              <option key={v.versionNumber} value={v.versionNumber}>{v.label}</option>
             ))}
           </select>
         </label>
@@ -45,7 +47,7 @@ export default function VersionDiff({
             className="rounded-ff border border-ff-border px-2 py-1"
           >
             {versions.map((v) => (
-              <option key={v.versionNumber} value={v.versionNumber}>v{v.versionNumber}</option>
+              <option key={v.versionNumber} value={v.versionNumber}>{v.label}</option>
             ))}
           </select>
         </label>
@@ -58,7 +60,7 @@ export default function VersionDiff({
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <div className="mb-1 text-xs font-medium text-ff-textMuted">v{fromV}</div>
+            <div className="mb-1 text-xs font-medium text-ff-textMuted">{fromLabel}</div>
             <pre className="max-h-96 overflow-auto rounded-ff border border-ff-border bg-white p-4 text-xs shadow-ff">
               {parts
                 .filter((part) => !part.added)
@@ -73,7 +75,7 @@ export default function VersionDiff({
             </pre>
           </div>
           <div>
-            <div className="mb-1 text-xs font-medium text-ff-textMuted">v{toV}</div>
+            <div className="mb-1 text-xs font-medium text-ff-textMuted">{toLabel}</div>
             <pre className="max-h-96 overflow-auto rounded-ff border border-ff-border bg-white p-4 text-xs shadow-ff">
               {parts
                 .filter((part) => !part.removed)

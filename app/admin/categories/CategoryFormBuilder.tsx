@@ -114,7 +114,7 @@ export default function CategoryFormBuilder({
 
     const duplicateLabel = [...labelCounts.entries()].find(([, count]) => count > 1)?.[0];
     if (duplicateLabel) {
-      setError(`"${duplicateLabel}" is used more than once in this form — field labels must be unique.`);
+      setError(`"${duplicateLabel}" is used more than once in this form, field labels must be unique.`);
       return;
     }
 

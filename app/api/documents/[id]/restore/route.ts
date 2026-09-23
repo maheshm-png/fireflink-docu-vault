@@ -33,7 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const ageDays = (Date.now() - document.deletedAt.getTime()) / (1000 * 60 * 60 * 24);
   if (ageDays > RECOVERY_WINDOW_DAYS) {
-    return NextResponse.json({ error: "Past the 30-day recovery window — this document has been permanently removed" }, { status: 400 });
+    return NextResponse.json({ error: "Past the 30-day recovery window, this document has been permanently removed" }, { status: 400 });
   }
 
   const restored = await prisma.document.update({

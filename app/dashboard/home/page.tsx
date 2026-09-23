@@ -14,15 +14,16 @@ export default async function HomePage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  // Same category + published-count query as the Published Documents page
-  // (app/dashboard/page.tsx) — each tile below links straight into that
-  // page pre-filtered to the category it represents, so the count shown
-  // here is exactly what clicking through will show.
+  // Same category + live-doc-count query as the Published Documents page
+  // (app/dashboard/page.tsx — see its own comment for why this isn't just
+  // `status: "published"`) — each tile below links straight into that page
+  // pre-filtered to the category it represents, so the count shown here is
+  // exactly what clicking through will show.
   const [categories, counts, unreadPublishedNotifications] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.document.groupBy({
       by: ["categoryId"],
-      where: { status: "published", deletedAt: null },
+      where: { deletedAt: null, currentVersionId: { not: null }, status: { notIn: ["archived", "revoked"] } },
       _count: { _all: true },
     }),
     // Seeds NewDocumentsProvider below, same as app/dashboard/page.tsx — this
@@ -53,7 +54,7 @@ export default async function HomePage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

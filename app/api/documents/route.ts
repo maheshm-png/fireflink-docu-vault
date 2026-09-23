@@ -6,7 +6,7 @@ import { buildStorageKey, uploadFile } from "@/lib/storage";
 import { extractText } from "@/lib/extract";
 import { convertToPdf, isConvertible } from "@/lib/officeConvert";
 import { logAudit } from "@/lib/audit";
-import { notifyManagerReviewNeeded } from "@/lib/notify";
+import { notifyManagerReviewNeeded, fireNotification } from "@/lib/notify";
 import { validateMetadataAgainstSchema, type CategoryFormField } from "@/lib/formSchema";
 import { validateFileMatchesDocType } from "@/lib/fileTypeValidation";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
@@ -20,11 +20,17 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Same visibility rule as GET /api/documents/:id: everyone sees published
-  // docs, uploader/owner/manager/superadmin also see their own non-published
-  // ones. Soft-deleted docs are excluded outright (see viewDeleted/restore
-  // for the manager-only recovery path). User relations are select-limited
-  // so this never leaks passwordHash or other internal fields.
-  const canSeeAll = user.role === "manager" || user.role === "superadmin";
+  // docs; uploader/owner/an assigned reviewer (any round) also see their own
+  // non-published ones; superadmin sees everything (org-wide oversight,
+  // same as viewDeleted/the audit log). A manager with no assignment on a
+  // given document does NOT see it here just by role — same narrower rule
+  // as app/dashboard/documents/[id]/page.tsx's canSeeUnpublishedDoc, so this
+  // listing can't be used to see a pending document that opening it
+  // directly wouldn't allow either. Soft-deleted docs are excluded outright
+  // (see viewDeleted/restore for the manager-only recovery path). User
+  // relations are select-limited so this never leaks passwordHash or other
+  // internal fields.
+  const canSeeAll = user.role === "superadmin";
   const userSelect = { id: true, name: true, email: true, role: true } as const;
 
   const docs = await prisma.document.findMany({
@@ -32,7 +38,14 @@ export async function GET() {
       deletedAt: null,
       ...(canSeeAll
         ? {}
-        : { OR: [{ status: "published" as const }, { uploadedById: user.id }, { ownerId: user.id }] }),
+        : {
+            OR: [
+              { status: "published" as const },
+              { uploadedById: user.id },
+              { ownerId: user.id },
+              { reviewRequests: { some: { reviewerId: user.id } } },
+            ],
+          }),
     },
     include: {
       category: true,
@@ -93,7 +106,7 @@ export async function POST(req: NextRequest) {
   // route can be called directly, so it's the real gate.
   if (ownerId === user.id) {
     return NextResponse.json(
-      { error: "You can't assign yourself as the reviewer for your own upload — choose someone else." },
+      { error: "You can't assign yourself as the reviewer for your own upload, choose someone else." },
       { status: 400 }
     );
   }
@@ -201,10 +214,15 @@ export async function POST(req: NextRequest) {
     include: { versions: true, category: true, owner: true },
   });
 
-  await prisma.document.update({
-    where: { id: document.id },
-    data: { currentVersionId: document.versions[0].id },
-  });
+  // Deliberately NOT setting currentVersionId here — a fresh upload hasn't
+  // been approved yet, so there's nothing yet that should count as "the"
+  // live/servable version. Preview for the uploader/reviewer while it's
+  // pending falls back to document.versions[0] instead (see
+  // app/dashboard/documents/[id]/page.tsx's forReferenceVisible section and
+  // ReviewTrailWithHighlights' `document.currentVersion ?? document.versions[0]`).
+  // currentVersionId gets set for real the moment this is actually approved
+  // (app/api/documents/[id]/review/route.ts), which is also what makes
+  // Share/Download available on the document's own page.
 
   await prisma.reviewRequest.create({
     data: {
@@ -220,16 +238,18 @@ export async function POST(req: NextRequest) {
   // its first review is routine, pre-publish status (see lib/notify.ts).
   // The assigned reviewer does get a targeted action-item alert, though, on
   // the separate manager-only Chat space.
-  await notifyManagerReviewNeeded({
-    documentTitle: document.title,
-    documentId: document.id,
-    categoryName: document.category.name,
-    uploaderName: user.name,
-    reviewerId: document.ownerId,
-    reviewerName: document.owner.name,
-    reviewerEmail: document.owner.email,
-    isNewVersion: false,
-  });
+  fireNotification(
+    notifyManagerReviewNeeded({
+      documentTitle: document.title,
+      documentId: document.id,
+      categoryName: document.category.name,
+      uploaderName: user.name,
+      reviewerId: document.ownerId,
+      reviewerName: document.owner.name,
+      reviewerEmail: document.owner.email,
+      isNewVersion: false,
+    })
+  );
 
   // NOTE: this does not yet index into Meilisearch — it's intentionally
   // excluded from search until it's approved and published.

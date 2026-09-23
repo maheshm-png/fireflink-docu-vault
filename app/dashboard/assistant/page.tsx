@@ -10,7 +10,7 @@ export default async function AssistantPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-hidden px-6 py-8 animate-fade-in">
         <h1 className="mb-4 flex items-center gap-1.5 text-2xl font-bold tracking-tight text-ff-text">
           Ask AI

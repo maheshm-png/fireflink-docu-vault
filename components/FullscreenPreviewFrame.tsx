@@ -32,10 +32,18 @@ export default function FullscreenPreviewFrame({
   children,
   heightClassName = "h-[80vh]",
   remountOnToggle = false,
+  watermark,
 }: {
   children: React.ReactNode;
   heightClassName?: string;
   remountOnToggle?: boolean;
+  // Rendered as an overlay INSIDE this component's own ref'd wrapper
+  // (components/ViewOnlyWatermark.tsx, from the share page) rather than by
+  // the caller placing it alongside this component — fullscreen only
+  // keeps descendants of the requestFullscreen() target visible, so a
+  // watermark sitting outside this wrapper would simply vanish the moment
+  // someone opens fullscreen, defeating the entire point of it.
+  watermark?: React.ReactNode;
 }) {
   const [fullscreen, setFullscreen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -68,6 +76,7 @@ export default function FullscreenPreviewFrame({
       <div className="h-full w-full" key={remountOnToggle ? String(fullscreen) : undefined}>
         {children}
       </div>
+      {watermark}
     </div>
   );
 }

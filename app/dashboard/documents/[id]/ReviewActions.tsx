@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
 
-type VersionOption = { id: string; versionNumber: number };
+type VersionOption = { id: string; versionNumber: number; label: string };
 type Reviewer = { id: string; name: string; role: string; reportsToId: string | null };
 
 export default function ReviewActions({
@@ -42,6 +42,7 @@ export default function ReviewActions({
   const [versionId, setVersionId] = useState(versions[0]?.id);
   const [announce, setAnnounce] = useState<"yes" | "no" | null>(null);
   const [allowFeedback, setAllowFeedback] = useState<"yes" | "no" | null>(null);
+  const [allowShare, setAllowShare] = useState<"yes" | "no" | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentsError, setCommentsError] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -76,14 +77,19 @@ export default function ReviewActions({
         decision,
         comments,
         ...(decision === "approved"
-          ? { announceToAll: willPublish && announce === "yes", allowFeedback: willPublish && allowFeedback === "yes", versionId }
+          ? {
+              announceToAll: willPublish && announce === "yes",
+              allowFeedback: willPublish && allowFeedback === "yes",
+              shareEnabled: willPublish && allowShare === "yes",
+              versionId,
+            }
           : {}),
       }),
     });
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setActionError(data?.error ?? "Could not complete this action — please try again.");
+      setActionError(data?.error ?? "Could not complete this action, please try again.");
       return;
     }
     router.refresh();
@@ -104,7 +110,7 @@ export default function ReviewActions({
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setActionError(data?.error ?? "Could not reassign — please try again.");
+      setActionError(data?.error ?? "Could not reassign, please try again.");
       return;
     }
     router.refresh();
@@ -125,7 +131,7 @@ export default function ReviewActions({
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setActionError(data?.error ?? "Could not request additional review — please try again.");
+      setActionError(data?.error ?? "Could not request additional review, please try again.");
       return;
     }
     setOpinionPicks(new Set());
@@ -144,7 +150,7 @@ export default function ReviewActions({
   return (
     <div className="mb-6 rounded-ff border border-ff-border bg-white p-4 shadow-ff">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-bold text-ff-text">Review this submission</h2>
+        <h2 className="text-base font-bold text-ff-text">Review Submission</h2>
         <div className="flex gap-1 rounded-ff border border-ff-border bg-ff-lavender/40 p-0.5 text-xs">
           {!isOwnDocument && (
             <button
@@ -201,7 +207,7 @@ export default function ReviewActions({
               >
                 {versions.map((v) => (
                   <option key={v.id} value={v.id}>
-                    v{v.versionNumber}
+                    {v.label}
                     {v.id === versions[0].id ? " (latest)" : ""}
                   </option>
                 ))}
@@ -253,6 +259,33 @@ export default function ReviewActions({
                   </label>
                 </div>
               </fieldset>
+              <fieldset className="mb-4 rounded-ff border border-ff-border p-3">
+                <legend className="px-1 text-xs font-medium text-ff-text">
+                  Allow this document to be shared via a public link? <span className="text-ff-danger">*</span>
+                </legend>
+                <div className="mt-1 flex gap-4 text-sm">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="allowShare"
+                      required
+                      checked={allowShare === "yes"}
+                      onChange={() => setAllowShare("yes")}
+                    />
+                    Yes, allow sharing
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="allowShare"
+                      required
+                      checked={allowShare === "no"}
+                      onChange={() => setAllowShare("no")}
+                    />
+                    No
+                  </label>
+                </div>
+              </fieldset>
             </>
           ) : (
             <p className="mb-4 text-xs text-ff-textMuted">
@@ -263,11 +296,11 @@ export default function ReviewActions({
 
           <div className="flex items-center gap-2">
             <button
-              disabled={busy || (willPublish && (announce === null || allowFeedback === null))}
+              disabled={busy || (willPublish && (announce === null || allowFeedback === null || allowShare === null))}
               onClick={() => decide("approved")}
               title={
-                willPublish && (announce === null || allowFeedback === null)
-                  ? "Answer both questions above first"
+                willPublish && (announce === null || allowFeedback === null || allowShare === null)
+                  ? "Answer all three questions above first"
                   : undefined
               }
               className="flex items-center justify-center rounded-ff bg-ff-success px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -281,8 +314,8 @@ export default function ReviewActions({
             >
               {busy ? <BrandedLoader size={16} variant="white" /> : "Reject"}
             </button>
-            {willPublish && (announce === null || allowFeedback === null) && (
-              <span className="text-xs text-ff-textMuted">Answer both questions above to enable Approve.</span>
+            {willPublish && (announce === null || allowFeedback === null || allowShare === null) && (
+              <span className="text-xs text-ff-textMuted">Answer all three questions above to enable Approve.</span>
             )}
           </div>
         </>

@@ -12,7 +12,10 @@ const EMPTY_STATE: NewDocumentsState = { documentIds: new Set(), categoryIds: ne
 
 const NewDocumentsContext = createContext<NewDocumentsState | null>(null);
 
-const POLL_INTERVAL_MS = 15_000;
+// See the matching comment in AnnouncementTicker.tsx — trimmed from 15s to
+// cut sustained polling load at scale; new-document badges arriving a bit
+// later is an acceptable tradeoff.
+const POLL_INTERVAL_MS = 45_000;
 
 /**
  * Wraps a dashboard page's content so the ticker's "new document" entries

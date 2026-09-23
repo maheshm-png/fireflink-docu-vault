@@ -117,7 +117,7 @@ export default function UploadForm({
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? "Upload failed — please try again.");
+      setError(data?.error ?? "Upload failed, please try again.");
       return;
     }
 

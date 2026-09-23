@@ -61,7 +61,7 @@ Description:`;
   } catch (err) {
     console.error("Description suggestion failed:", err);
     return NextResponse.json(
-      { error: "Could not generate a suggestion right now — the AI service may be unavailable." },
+      { error: "Could not generate a suggestion right now, the AI service may be unavailable." },
       { status: 503 }
     );
   }

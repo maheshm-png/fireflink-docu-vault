@@ -26,7 +26,7 @@ export type PreparedAssistant =
 const NO_MATCH_ANSWER = "No relevant content found.";
 
 function unavailableError(): Error & { status: number } {
-  const e = new Error("AI assistant is unavailable right now — please try again shortly.") as Error & {
+  const e = new Error("AI assistant is unavailable right now, please try again shortly.") as Error & {
     status: number;
   };
   e.status = 503;

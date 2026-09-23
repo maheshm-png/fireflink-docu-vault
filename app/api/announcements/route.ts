@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Message is required." }, { status: 400 });
   }
   if (message.length > 300) {
-    return NextResponse.json({ error: "Keep it under 300 characters — this scrolls in a single line." }, { status: 400 });
+    return NextResponse.json({ error: "Keep it under 300 characters, this scrolls in a single line." }, { status: 400 });
   }
 
   const announcement = await prisma.announcement.create({

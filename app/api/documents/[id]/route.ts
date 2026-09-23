@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { logAudit } from "@/lib/audit";
 import { indexDocument, removeFromIndex } from "@/lib/search";
+import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 import { validateMetadataAgainstSchema, type CategoryFormField } from "@/lib/formSchema";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
@@ -24,13 +25,34 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     },
   });
 
-  // Uploader/owner/manager/superadmin can see pending docs too; everyone
-  // else only ever reaches published ones (also enforced by DB-level RLS).
+  // Same "is there a real, currently-live approved version" check the
+  // dashboard page uses (app/dashboard/documents/[id]/page.tsx's
+  // hasEverPublished/isPubliclyVisible): a document simply back in
+  // re-review after already being published once (status pending_review or
+  // rejected) must stay visible to everyone, same as it does there.
+  // Checking the raw document.status === "published" here would 404 a
+  // document the dashboard just showed as accessible.
+  const reviewRequestsForVisibility = await prisma.reviewRequest.findMany({
+    where: { documentId: document.id },
+    select: { roundNumber: true, status: true, comments: true, createdAt: true, reviewerId: true },
+  });
+  const hasEverPublished =
+    document.currentVersionId !== null &&
+    everApprovedVersionIds(document.versions, reviewRequestsForVisibility, document.revokedAt).has(
+      document.currentVersionId
+    );
+  const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+
+  // Uploader/owner/an assigned reviewer (any round)/superadmin can see a
+  // not-yet-public document too; a manager with no assignment on THIS
+  // document can't, same as app/dashboard/documents/[id]/page.tsx's own
+  // canSeeUnpublishedDoc (its own comment has the full reasoning). Everyone
+  // else only ever reaches publicly visible ones (also enforced by DB-level RLS).
   const canSeeUnpublished =
-    document.status === "published" ||
+    isPubliclyVisible ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
-    user.role === "manager" ||
+    reviewRequestsForVisibility.some((r) => r.reviewerId === user.id) ||
     user.role === "superadmin";
   if (!canSeeUnpublished) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -53,9 +75,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   });
 }
 
-// PATCH /api/documents/:id — edit title/docType/tags/custom-field metadata.
+// PATCH /api/documents/:id — edit title/tags/custom-field metadata.
 // Deliberately does NOT touch the file/version — replacing the actual
-// document goes through POST /api/documents/:id/versions (and review) instead.
+// document goes through POST /api/documents/:id/versions (and review)
+// instead. docType is likewise not editable here: it's set once at initial
+// upload (app/api/documents/route.ts, validated against the actual bytes)
+// and every later version upload is checked against that same fixed type
+// (app/api/documents/[id]/versions/route.ts) rather than allowed to change
+// it — a document silently relabeled to a type its actual file isn't would
+// break every downstream feature that trusts docType (preview renderer,
+// watermarking rules in app/api/documents/[id]/download/route.ts,
+// LibreOffice conversion assumptions), so there's no door to change it
+// after the fact.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -79,7 +110,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { title, docType, tags, metadata } = await req.json();
+  const { title, tags, metadata } = await req.json();
 
   const schema = (document.category.formSchema as unknown as CategoryFormField[]) ?? [];
   const { valid, missing } = validateMetadataAgainstSchema(schema, metadata ?? {});
@@ -117,7 +148,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     where: { id: document.id },
     data: {
       title,
-      docType,
       tags,
       metadata: (metadata ?? {}) as Prisma.InputJsonValue,
       ...duplicateUpdate,
@@ -159,6 +189,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 // pending_review (withdrawing a mistaken upload) — but never after it's
 // been published, which only a manager can take down (and even then via
 // revoke, not delete — see app/api/documents/[id]/revoke/route.ts).
+//
+// Once some manager has actually approved this document, a DIFFERENT
+// manager who was never part of that decision (never assigned as a
+// reviewer on any round, and isn't the uploader/owner) can no longer delete
+// it out from under that approval — see app/dashboard/documents/[id]/
+// page.tsx's matching canDelete for the same rule, enforced here since the
+// UI hiding the button isn't enough on its own against a direct API call.
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -169,11 +206,27 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ error: "This document has already been deleted" }, { status: 400 });
   }
 
+  let canDeleteAsManager = can(user.role, "deleteDocument");
+  if (canDeleteAsManager) {
+    const reviewRequests = await prisma.reviewRequest.findMany({
+      where: { documentId: document.id },
+      select: { status: true, reviewerId: true },
+    });
+    const everApproved = reviewRequests.some((r) => r.status === "approved");
+    const inReviewCycle =
+      document.uploadedById === user.id ||
+      document.ownerId === user.id ||
+      reviewRequests.some((r) => r.reviewerId === user.id);
+    canDeleteAsManager = !everApproved || inReviewCycle;
+  }
+
   const canDelete =
-    can(user.role, "deleteDocument") ||
-    (document.status === "pending_review" && document.uploadedById === user.id);
+    canDeleteAsManager || (document.status === "pending_review" && document.uploadedById === user.id);
   if (!canDelete) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Only a manager who was part of this document's review can delete it once it's been approved." },
+      { status: 403 }
+    );
   }
 
   if (document.status === "published") {

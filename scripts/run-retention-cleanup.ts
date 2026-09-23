@@ -22,6 +22,7 @@ import { prisma } from "../lib/prisma";
 import { deleteFile } from "../lib/storage";
 import { notifyManagerRetentionAlert } from "../lib/notify";
 import { getAppSettings } from "../lib/settings";
+import { computeRoundAttempts } from "../lib/versionRounds";
 
 async function purgeExpiredDeletedDocuments(retentionDays: number) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
@@ -82,9 +83,27 @@ async function purgeOldSupersededVersions(retentionDays: number) {
     include: { document: true },
   });
 
-  const purged: { documentTitle: string; versionNumber: number }[] = [];
+  const purged: { documentTitle: string; versionLabel: string }[] = [];
 
   for (const version of versions) {
+    // Computed before deleting the row below — needs this document's full
+    // version/round history as it stands right now, since once this row is
+    // gone it can no longer contribute to that computation for anything
+    // purged after it in this same run.
+    const [labelVersions, labelReviewRequests] = await Promise.all([
+      prisma.documentVersion.findMany({
+        where: { documentId: version.documentId },
+        select: { id: true, versionNumber: true, uploadedAt: true },
+      }),
+      prisma.reviewRequest.findMany({
+        where: { documentId: version.documentId },
+        select: { roundNumber: true, status: true, comments: true, createdAt: true },
+      }),
+    ]);
+    const versionLabel =
+      computeRoundAttempts(labelVersions, labelReviewRequests, version.document.revokedAt).byVersionId.get(version.id)?.label ??
+      `v${version.versionNumber}`;
+
     const keys = [version.filePath, version.previewPdfPath].filter((k): k is string => Boolean(k));
     for (const key of keys) {
       try {
@@ -94,7 +113,7 @@ async function purgeOldSupersededVersions(retentionDays: number) {
       }
     }
     await prisma.documentVersion.delete({ where: { id: version.id } });
-    purged.push({ documentTitle: version.document.title, versionNumber: version.versionNumber });
+    purged.push({ documentTitle: version.document.title, versionLabel });
   }
 
   return purged;

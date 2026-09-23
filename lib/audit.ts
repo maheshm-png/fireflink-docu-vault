@@ -23,7 +23,7 @@ export type AuditAction =
   | "extend_validity" | "toggle_permanent" | "dismiss_duplicate" | "set_current_version"
   | "post_announcement" | "edit_announcement" | "hold_announcement" | "resume_announcement" | "delete_announcement"
   | "reassign_review" | "request_second_opinion" | "undo_approval"
-  | "remove_user" | "restore_user";
+  | "remove_user" | "restore_user" | "reset_password";
 
 export async function logAudit(params: {
   userId: string;

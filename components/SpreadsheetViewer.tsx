@@ -22,7 +22,7 @@ export default function SpreadsheetViewer({ documentId, version }: { documentId:
         return r.json();
       })
       .then(setData)
-      .catch(() => setError("Could not render this spreadsheet — try downloading it instead."));
+      .catch(() => setError("Could not render this spreadsheet, try downloading it instead."));
   }, [documentId, version]);
 
   if (error) {
@@ -91,7 +91,7 @@ export default function SpreadsheetViewer({ documentId, version }: { documentId:
           </div>
           {sheet.truncated && (
             <p className="mt-2 text-xs text-ff-textMuted">
-              Showing the first 500 rows of {sheet.name} — download the file for the complete data.
+              Showing the first 500 rows of {sheet.name}, download the file for the complete data.
             </p>
           )}
         </>

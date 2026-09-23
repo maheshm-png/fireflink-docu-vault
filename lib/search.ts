@@ -70,10 +70,22 @@ export async function removeFromIndex(id: string) {
 }
 
 export async function search(query: string, filters: string[] = [], limit = 25) {
-  return client.index(INDEX).search(query, {
-    filter: filters.length ? filters.join(" AND ") : undefined,
-    limit,
-  });
+  try {
+    return await client.index(INDEX).search(query, {
+      filter: filters.length ? filters.join(" AND ") : undefined,
+      limit,
+    });
+  } catch (err) {
+    // Best-effort, same philosophy as indexDocument/removeFromIndex above —
+    // a self-hosted Meilisearch outage (its Docker container restarting
+    // after the host machine wakes from sleep, say) used to crash the
+    // entire Published Documents page with an unhandled exception for
+    // every viewer. Degrading to "no results" keeps the rest of the page
+    // usable while the outage shows up in server logs instead of a blank
+    // crash screen.
+    console.error(`Meilisearch search failed for query "${query}" (index may be unreachable):`, err);
+    return { hits: [], processingTimeMs: 0, query, limit, offset: 0 };
+  }
 }
 
 /**
@@ -86,10 +98,17 @@ export async function search(query: string, filters: string[] = [], limit = 25) 
  * hits worth treating as "relevant content found."
  */
 export async function searchScored(query: string, filters: string[] = [], limit = 25, rankingScoreThreshold = 0.4) {
-  return client.index(INDEX).search(query, {
-    filter: filters.length ? filters.join(" AND ") : undefined,
-    limit,
-    showRankingScore: true,
-    rankingScoreThreshold,
-  });
+  try {
+    return await client.index(INDEX).search(query, {
+      filter: filters.length ? filters.join(" AND ") : undefined,
+      limit,
+      showRankingScore: true,
+      rankingScoreThreshold,
+    });
+  } catch (err) {
+    // Same fallback as search() above — a Meilisearch outage shouldn't
+    // break the AI assistant either, it should just have nothing to cite.
+    console.error(`Meilisearch searchScored failed for query "${query}" (index may be unreachable):`, err);
+    return { hits: [], processingTimeMs: 0, query, limit, offset: 0 };
+  }
 }

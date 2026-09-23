@@ -5,12 +5,14 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Home, Files, LayoutDashboard, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
-  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound,
+  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
-import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
 import Logo from "./Logo";
 import NotificationBell from "./NotificationBell";
+import InfoTooltip from "./InfoTooltip";
+import PlumWatermark from "./PlumWatermark";
 
 // Same client-side reset-email flow used on the logged-out /login page (see
 // its handleResetRequest) — reused here so a signed-in user can trigger it
@@ -27,17 +29,25 @@ export default function Navbar({
   userName,
   userEmail,
   userDesignation,
+  userTeam,
+  userReportsTo,
 }: {
   role: Role;
   userName: string;
   userEmail: string;
   userDesignation?: string | null;
+  userTeam?: string | null;
+  userReportsTo?: string | null;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [resetStatus, setResetStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [resetErrorMessage, setResetErrorMessage] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changeStatus, setChangeStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [changeErrorMessage, setChangeErrorMessage] = useState<string | null>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // Full path+query, so a dropdown item like "/dashboard/pending?status=
@@ -65,18 +75,59 @@ export default function Navbar({
     router.push(`/dashboard?${next.toString()}`);
   }
 
-  async function handleResetPassword() {
-    setResetStatus("sending");
-    setResetErrorMessage(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (error) {
-      setResetErrorMessage(error.message);
-      setResetStatus("error");
+  function resetChangePasswordForm() {
+    setChangingPassword(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setChangeStatus("idle");
+    setChangeErrorMessage(null);
+  }
+
+  // Requires the current password rather than just calling
+  // supabase.auth.updateUser directly — that call only needs an active
+  // session and would let anyone at an already-unlocked device change the
+  // password without knowing it. Verifying by actually signing in with it
+  // first (discarding that second session immediately after) is the
+  // simplest way to enforce that dependency client-side, since Supabase
+  // doesn't expose a "reauthenticate with password" call of its own.
+  // Someone who's forgotten their current password entirely has no
+  // self-service path here on purpose — that's what the admin is for.
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setChangeErrorMessage("New password and confirmation don't match.");
+      setChangeStatus("error");
       return;
     }
-    setResetStatus("sent");
+    if (newPassword.length < 8) {
+      setChangeErrorMessage("New password must be at least 8 characters.");
+      setChangeStatus("error");
+      return;
+    }
+    setChangeStatus("saving");
+    setChangeErrorMessage(null);
+
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: userEmail,
+      password: currentPassword,
+    });
+    if (verifyError) {
+      setChangeErrorMessage("Current password is incorrect.");
+      setChangeStatus("error");
+      return;
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    if (updateError) {
+      setChangeErrorMessage(updateError.message);
+      setChangeStatus("error");
+      return;
+    }
+    setChangeStatus("success");
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
   }
 
   async function handleLogout() {
@@ -120,17 +171,23 @@ export default function Navbar({
     ...(isManagerUp ? [{ href: "/admin/settings", label: "Settings", icon: Settings }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/users", label: "Manage Users", icon: Users }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/designations", label: "Designations", icon: IdCard }] : []),
+    ...(role === "superadmin" ? [{ href: "/admin/teams", label: "Teams", icon: UsersRound }] : []),
   ];
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 bg-ff-plum-gradient px-3 text-white shadow-ff-lg sm:gap-3 sm:px-4">
+    <header className="relative flex h-16 shrink-0 items-center gap-2 bg-ff-plum-gradient px-3 text-white shadow-ff-lg sm:gap-3 sm:px-4">
       {/* Three regions (left/center/right) instead of one long flex row —
           center is its own flex-1 that centers its own content, so the nav
           sits in the true middle of the bar regardless of how wide the logo
           or the right-hand icon cluster happen to be, rather than just
           drifting left because it's next in DOM order. */}
-      <div className="flex shrink-0 basis-0 items-center gap-2.5" style={{ flexGrow: 1 }}>
-        <Link href="/dashboard/home" className="flex shrink-0 items-center gap-2.5">
+      <div className="relative flex shrink-0 basis-0 items-center gap-2.5 overflow-hidden" style={{ flexGrow: 1 }}>
+        {/* Clipped to THIS flex region only, not the whole header (which
+            would also clip the nav dropdowns and profile menu below them) —
+            sits in the leftover space after the logo, so it never overlaps
+            the logo, the centered nav, or the icon cluster on the right. */}
+        <PlumWatermark className="absolute -top-8 left-40 z-0 hidden w-20 sm:block" />
+        <Link href="/dashboard/home" className="relative z-10 flex shrink-0 items-center gap-2.5">
           <Logo variant="white" width={130} height={32} priority />
           <span className="hidden h-5 w-px bg-white/25 sm:block" aria-hidden />
           <span className="hidden whitespace-nowrap text-lg font-bold uppercase tracking-wide text-white sm:block">
@@ -195,7 +252,7 @@ export default function Navbar({
 
         <div className="relative shrink-0">
           <button
-            onClick={() => setProfileOpen((v) => { if (!v) setResetStatus("idle"); return !v; })}
+            onClick={() => setProfileOpen((v) => { if (!v) resetChangePasswordForm(); return !v; })}
             aria-label="Your profile"
             title={userName}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold uppercase transition-colors hover:bg-white/25"
@@ -221,31 +278,92 @@ export default function Navbar({
                 </div>
                 <dl className="space-y-2 border-t border-ff-border pt-3 text-sm">
                   <div className="flex items-start justify-between gap-3">
-                    <dt className="shrink-0 text-ff-textMuted">Role</dt>
+                    <dt className="flex shrink-0 items-center gap-1 text-ff-textMuted">
+                      Role
+                      <InfoTooltip text={ROLE_DESCRIPTIONS[role]} align="right" />
+                    </dt>
                     <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{ROLE_LABELS[role]}</dd>
                   </div>
                   <div className="flex items-start justify-between gap-3">
                     <dt className="shrink-0 text-ff-textMuted">Designation</dt>
-                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userDesignation ?? "—"}</dd>
+                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userDesignation ?? "N/A"}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="shrink-0 text-ff-textMuted">Team</dt>
+                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userTeam ?? "N/A"}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="shrink-0 text-ff-textMuted">Reports To</dt>
+                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userReportsTo ?? "N/A"}</dd>
                   </div>
                 </dl>
 
                 <div className="mt-3 border-t border-ff-border pt-3">
-                  <button
-                    onClick={handleResetPassword}
-                    disabled={resetStatus === "sending" || resetStatus === "sent"}
-                    className="flex w-full items-center gap-2 rounded-ff px-1.5 py-1.5 text-left text-sm text-ff-text transition-colors hover:bg-ff-lavender/60 disabled:cursor-default disabled:hover:bg-transparent"
-                  >
-                    <KeyRound className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
-                    {resetStatus === "sending" ? "Sending reset link..." : "Reset Password"}
-                  </button>
-                  {resetStatus === "sent" && (
-                    <p className="mt-1 px-1.5 text-xs text-ff-success">Check your email for a reset link.</p>
-                  )}
-                  {resetStatus === "error" && (
-                    <p className="mt-1 px-1.5 text-xs text-ff-danger">
-                      {resetErrorMessage ?? "Could not send the reset link. Please try again."}
-                    </p>
+                  {!changingPassword ? (
+                    <button
+                      onClick={() => setChangingPassword(true)}
+                      className="flex w-full items-center gap-2 rounded-ff px-1.5 py-1.5 text-left text-sm text-ff-text transition-colors hover:bg-ff-lavender/60"
+                    >
+                      <KeyRound className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                      Change Password
+                    </button>
+                  ) : (
+                    <form onSubmit={handleChangePassword} className="space-y-2">
+                      <div className="flex items-center gap-2 px-1.5 text-sm font-medium text-ff-text">
+                        <KeyRound className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                        Change Password
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        autoFocus
+                        placeholder="Current password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full rounded-ff border border-ff-border px-2.5 py-1.5 text-sm outline-none focus:border-ff-accent"
+                      />
+                      <input
+                        type="password"
+                        required
+                        placeholder="New password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full rounded-ff border border-ff-border px-2.5 py-1.5 text-sm outline-none focus:border-ff-accent"
+                      />
+                      <input
+                        type="password"
+                        required
+                        placeholder="Confirm new password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full rounded-ff border border-ff-border px-2.5 py-1.5 text-sm outline-none focus:border-ff-accent"
+                      />
+                      {changeStatus === "error" && (
+                        <p className="px-1.5 text-xs text-ff-danger">{changeErrorMessage}</p>
+                      )}
+                      {changeStatus === "success" && (
+                        <p className="px-1.5 text-xs text-ff-success">Password changed.</p>
+                      )}
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="submit"
+                          disabled={changeStatus === "saving"}
+                          className="rounded-ff bg-ff-accent-gradient px-3 py-1.5 text-xs font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105 disabled:opacity-60"
+                        >
+                          {changeStatus === "saving" ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetChangePasswordForm}
+                          className="rounded-ff border border-ff-border px-3 py-1.5 text-xs text-ff-text transition-colors hover:bg-ff-lavender/40"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="px-1.5 pt-1 text-xs text-ff-textMuted">
+                        Forgotten your current password entirely? Contact your admin to have it reset.
+                      </p>
+                    </form>
                   )}
                 </div>
               </div>
