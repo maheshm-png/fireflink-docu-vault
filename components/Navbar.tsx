@@ -5,7 +5,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Home, Files, LayoutDashboard, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
-  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText,
+  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText, Mail,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
@@ -22,7 +22,7 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type NavItem = { href: string; label: string; icon: typeof Files };
+type NavItem = { href: string; label: string; icon: typeof Files; title?: string };
 
 export default function Navbar({
   role,
@@ -163,6 +163,12 @@ export default function Navbar({
   const helpItems: NavItem[] = [
     { href: "/dashboard/assistant", label: "Ask Docu AI", icon: Sparkles },
     { href: "/dashboard/help", label: "Roles & Features", icon: BookOpenText },
+    {
+      href: "mailto:docuvault@fireflink.com?subject=FireFlink%20Docu%20Vault%20Support",
+      label: "Contact Support",
+      icon: Mail,
+      title: "docuvault@fireflink.com",
+    },
   ];
 
   const controlsItems: NavItem[] = [
@@ -458,6 +464,7 @@ function NavDropdown({
                 <Link
                   key={item.href}
                   href={item.href}
+                  title={item.title}
                   onClick={() => setOpen(false)}
                   className={`flex items-center gap-2.5 rounded-ff px-3 py-2 text-sm transition-colors ${
                     active ? "bg-ff-lavender text-ff-accent" : "text-ff-text hover:bg-ff-lavender/60"

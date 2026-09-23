@@ -48,7 +48,8 @@ export default async function DocumentActivityPage({
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
-        <div className="flex-1 overflow-y-auto mx-auto max-w-3xl px-6 py-8 animate-fade-in">
+        <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
+        <div className="max-w-3xl">
         <Link href="/admin/analytics" className="mb-4 inline-block text-sm text-ff-accent hover:underline">
           ← Back to Analytics
         </Link>
@@ -86,6 +87,7 @@ export default async function DocumentActivityPage({
               </tbody>
             </table>
           )}
+        </div>
         </div>
         </div>
       </main>

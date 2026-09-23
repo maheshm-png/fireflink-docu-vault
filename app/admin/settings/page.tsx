@@ -21,7 +21,8 @@ export default async function SettingsPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
-        <div className="flex-1 overflow-y-auto mx-auto max-w-3xl px-6 py-8 animate-fade-in space-y-6">
+        <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
+        <div className="max-w-3xl space-y-6">
         <div>
           <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Settings</h1>
           <p className="text-sm text-ff-textMuted">Org-wide review and retention behavior.</p>
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
           initialDeletedDocRetentionDays={settings.deletedDocRetentionDays}
           initialOldVersionRetentionDays={settings.oldVersionRetentionDays}
         />
+        </div>
         </div>
       </main>
     </div>

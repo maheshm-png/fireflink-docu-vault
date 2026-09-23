@@ -907,7 +907,7 @@ export default async function DocumentDetailPage({
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-6 py-8 animate-fade-in">
+        <div className="mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <Link
           href="/dashboard"
           className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-ff-textMuted hover:text-ff-accent"

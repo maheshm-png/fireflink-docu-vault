@@ -78,7 +78,7 @@ export default async function ManageUsersPage({
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
-        <div className="flex-1 overflow-y-auto mx-auto max-w-6xl px-6 py-8">
+        <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8">
         <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Manage Users</h1>
         <p className="mb-6 text-sm text-ff-textMuted">
           Add teammates and control what they can do in the Docs Hub.

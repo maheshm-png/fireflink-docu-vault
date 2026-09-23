@@ -25,7 +25,7 @@ export default async function DeletedDocumentsPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
-        <div className="flex-1 overflow-y-auto mx-auto max-w-5xl px-6 py-8 animate-fade-in">
+        <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Deleted Documents</h1>
         <p className="mb-6 text-sm text-ff-textMuted">
           Deleted documents stay recoverable for {RECOVERY_WINDOW_DAYS} days before being permanently removed.
