@@ -14,7 +14,8 @@
     "digest:send": "tsx scripts/send-digest.ts",
     "search:setup": "tsx scripts/setup-search.ts",
     "backfill:preview": "tsx scripts/backfill-preview-pdf.ts",
-    "reindex:search": "tsx scripts/reindex-search.ts"
+    "reindex:search": "tsx scripts/reindex-search.ts",
+    "password:force": "tsx scripts/force-password-change.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.629.0",

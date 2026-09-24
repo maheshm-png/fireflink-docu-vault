@@ -53,7 +53,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         { status: 400 }
       );
     }
-    const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(target.id, { password });
+    // An admin knows this password, so the user must pick their own at next
+    // sign-in (enforced by middleware.ts, cleared by /api/auth/set-password).
+    const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(target.id, {
+      password,
+      app_metadata: { must_change_password: true },
+    });
     if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
     await logAudit({ userId: user.id, action: "reset_password", documentId: undefined });
     passwordWasReset = true;

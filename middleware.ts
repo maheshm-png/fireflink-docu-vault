@@ -27,9 +27,22 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Set (app_metadata, so only the server can) whenever an admin chose the
+  // password or an invite link signed them in without one. Until they pick
+  // their own on /accept-invite, nothing else in the app is reachable.
+  // /api/auth/* stays open so that page can save the new password and
+  // sign-out keeps working.
+  if (session?.user.app_metadata?.must_change_password === true) {
+    if (req.nextUrl.pathname.startsWith("/api/")) {
+      if (req.nextUrl.pathname.startsWith("/api/auth/")) return res;
+      return NextResponse.json({ error: "Set your password first." }, { status: 403 });
+    }
+    return NextResponse.redirect(new URL("/accept-invite", req.url));
+  }
+
   return res;
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*"],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/api/:path*"],
 };

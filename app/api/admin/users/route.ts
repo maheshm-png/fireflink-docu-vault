@@ -93,7 +93,10 @@ export async function POST(req: NextRequest) {
     // yourself" escape hatch applies to bringing someone back, not just a
     // first-time add.
     if (password) {
-      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(existing.id, { password });
+      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+        password,
+        app_metadata: { must_change_password: true },
+      });
       if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
     }
     const reactivated = await prisma.user.update({
@@ -116,7 +119,15 @@ export async function POST(req: NextRequest) {
   let actionLink: string | null = null;
   let invitedUserId: string;
   if (password) {
-    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
+    // must_change_password (app_metadata, so only this service-role client can
+    // set or clear it) makes middleware.ts hold the user on /accept-invite
+    // until they replace this admin-chosen password with their own.
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { must_change_password: true },
+    });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     invitedUserId = created.user.id;
   } else {
@@ -128,6 +139,16 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     invitedUserId = generated.user.id;
     actionLink = generated.properties.action_link;
+    // The invite link signs them in with no password set yet, so without this
+    // flag they could skip /accept-invite and browse straight to the app.
+    const { error: flagError } = await supabaseAdmin.auth.admin.updateUserById(invitedUserId, {
+      app_metadata: { must_change_password: true },
+    });
+    if (flagError) {
+      // Don't leave an unflagged, unrecorded auth user behind for a retry to trip over.
+      await supabaseAdmin.auth.admin.deleteUser(invitedUserId);
+      return NextResponse.json({ error: flagError.message }, { status: 500 });
+    }
   }
 
   const newUser = await prisma.user.create({

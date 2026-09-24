@@ -192,7 +192,7 @@ export default function WorkspaceAppManager({ initialApps }: { initialApps: Work
       <div className="space-y-2">
         {initialApps.length === 0 && (
           <div className="rounded-ff border border-ff-border bg-white p-6 text-center text-sm text-ff-textMuted">
-            No apps yet. Add one above so it shows up on the Workspace launcher.
+            No assets yet. Add one above so it shows up on the Presales Team Assets page.
           </div>
         )}
         {initialApps.map((a, i) => {
@@ -323,7 +323,7 @@ export default function WorkspaceAppManager({ initialApps }: { initialApps: Work
 
       <ConfirmModal
         open={confirmingId !== null}
-        title="Remove this app from the Workspace launcher?"
+        title="Remove this asset from Presales Team Assets?"
         message="This can't be undone."
         confirmLabel="Yes, remove"
         danger

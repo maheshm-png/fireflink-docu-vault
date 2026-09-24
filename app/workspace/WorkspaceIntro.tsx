@@ -65,8 +65,8 @@ export default function WorkspaceIntro() {
         className="relative mt-7 overflow-hidden text-center animate-intro-logo-in"
         style={{ animationDelay: "0.5s" }}
       >
-        <p className="text-lg font-semibold text-white/90 sm:text-xl">Welcome to FireFlink Suite</p>
-        <p className="mt-1 text-2xl font-extrabold uppercase tracking-wide text-white sm:text-3xl">Workspace</p>
+        <p className="text-lg font-semibold text-white/90 sm:text-xl">Welcome to</p>
+        <p className="mt-1 text-2xl font-extrabold uppercase tracking-wide text-white sm:text-3xl">Presales Team Assets</p>
       </div>
     </div>
   );

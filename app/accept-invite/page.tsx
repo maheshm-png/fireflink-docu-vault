@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import Logo from "@/components/Logo";
 import BrandedLoader from "@/components/BrandedLoader";
@@ -16,15 +15,40 @@ const supabase = createBrowserClient(
 // the URL hash (handled automatically by the client library) after the
 // user clicks the action_link emailed by app/api/admin/users's POST handler
 // (generated via generateLink, sent through this app's own SMTP rather than
-// Supabase's — see that route's own comment for why). Same mechanic the old
-// app/reset-password page used for a recovery link, just for a first-ever
-// password instead of a forgotten one.
+// Supabase's — see that route's own comment for why). Also where middleware.ts
+// sends anyone signed in with a must_change_password flag, which includes
+// users an admin gave a password to directly: they sign in normally, then
+// land here to replace it with their own.
 export default function AcceptInvitePage() {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "saving" | "done">("idle");
+  // False only while an invite link's tokens are being turned into a session.
+  const [ready, setReady] = useState(true);
+
+  // An invite link's tokens arrive in the URL hash (implicit flow), but this
+  // browser client runs in PKCE mode and ignores them, so the session has to
+  // be established by hand. Without a hash (someone already signed in and
+  // sent here by middleware.ts) there is nothing to do.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    const linkError = params.get("error_description");
+    if (linkError) {
+      setError(`${linkError.replace(/\+/g, " ")}. Ask an admin to send a new invite.`);
+      return;
+    }
+    if (!accessToken || !refreshToken) return;
+    setReady(false);
+    supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }).then(({ error }) => {
+      if (error) setError(`${error.message}. Ask an admin to send a new invite.`);
+      // Tokens shouldn't linger in the address bar or browser history.
+      window.history.replaceState(null, "", window.location.pathname);
+      setReady(true);
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,14 +58,32 @@ export default function AcceptInvitePage() {
       return;
     }
     setStatus("saving");
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) {
-      setError(error.message);
+    // Read before saving: changing the password revokes this session.
+    const { data: { session } } = await supabase.auth.getSession();
+    // Saved server-side, not via supabase.auth.updateUser: that route is the
+    // only thing that can clear the must_change_password flag middleware.ts
+    // enforces, and it does so in the same call that changes the password.
+    const res = await fetch("/api/auth/set-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      setError(data?.error ?? "Could not set your password, please try again.");
       setStatus("idle");
       return;
     }
+    // Changing a password revokes the old session's refresh token, and its
+    // JWT still carries the old flag, so sign in again with the new password
+    // to get a clean session. If that somehow fails, plain sign-in still works.
+    const email = session?.user.email;
+    const relogin = email ? await supabase.auth.signInWithPassword({ email, password }) : null;
     setStatus("done");
-    setTimeout(() => router.push("/login"), 1500);
+    // Full page load, not router.push: this page was usually reached by a
+    // client-side redirect from middleware, and the router doesn't reliably
+    // leave it again for the same target it was just bounced away from.
+    setTimeout(() => window.location.assign(relogin && !relogin.error ? "/dashboard/home" : "/login"), 1500);
   }
 
   return (
@@ -55,7 +97,7 @@ export default function AcceptInvitePage() {
 
         {status === "done" ? (
           <p className="rounded-ff border border-ff-success/30 bg-ff-success/10 p-3 text-center text-sm text-ff-success">
-            Password set, redirecting you to sign in.
+            Password set, taking you to your dashboard.
           </p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -92,7 +134,7 @@ export default function AcceptInvitePage() {
 
             <button
               type="submit"
-              disabled={status === "saving"}
+              disabled={status === "saving" || !ready}
               className="flex w-full items-center justify-center rounded-full bg-ff-accent-gradient py-2.5 text-sm font-medium text-white shadow-ff-md transition-all hover:shadow-ff-lg hover:brightness-105 disabled:opacity-60"
             >
               {status === "saving" ? <BrandedLoader size={18} variant="white" label="Saving..." /> : "Set Password & Continue"}

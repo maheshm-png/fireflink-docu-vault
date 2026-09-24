@@ -51,7 +51,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "That code has expired. Request a new one." }, { status: 400 });
   }
 
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, { password });
+  // The person chose this password themselves via an emailed code, so any
+  // must_change_password flag from an earlier admin-set one no longer applies.
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+    password,
+    app_metadata: { must_change_password: false },
+  });
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
