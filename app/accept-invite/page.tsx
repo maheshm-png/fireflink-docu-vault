@@ -27,11 +27,24 @@ export default function AcceptInvitePage() {
   // False only while an invite link's tokens are being turned into a session.
   const [ready, setReady] = useState(true);
 
-  // An invite link's tokens arrive in the URL hash (implicit flow), but this
-  // browser client runs in PKCE mode and ignores them, so the session has to
-  // be established by hand. Without a hash (someone already signed in and
-  // sent here by middleware.ts) there is nothing to do.
+  // Turns an invite link into a session. The emailed link carries a one-time
+  // token_hash in the query (see app/api/admin/users), exchanged here via
+  // verifyOtp. The URL-hash branch below covers links Supabase built itself
+  // (implicit flow), which this PKCE browser client would otherwise ignore.
+  // With neither (someone already signed in and sent here by middleware.ts)
+  // there is nothing to do.
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const tokenHash = query.get("token_hash");
+    if (tokenHash) {
+      setReady(false);
+      supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ error }) => {
+        if (error) setError("This invite link has expired or was already used. Ask an admin to send a new invite.");
+        window.history.replaceState(null, "", window.location.pathname);
+        setReady(true);
+      });
+      return;
+    }
     const params = new URLSearchParams(window.location.hash.slice(1));
     const accessToken = params.get("access_token");
     const refreshToken = params.get("refresh_token");
