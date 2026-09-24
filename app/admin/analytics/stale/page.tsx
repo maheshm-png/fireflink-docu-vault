@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
 import ViewToggle from "@/components/ViewToggle";
@@ -63,6 +64,7 @@ export default async function StaleDocumentsPage({
         </p>
         {searchParams.view === "grid" ? <DocumentGrid rows={rows} /> : <DocumentTable rows={rows} />}
         </div>
+        <Footer />
       </main>
     </div>
   );

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { getAppSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import SettingsForm from "./SettingsForm";
@@ -36,6 +37,7 @@ export default async function SettingsPage() {
         />
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

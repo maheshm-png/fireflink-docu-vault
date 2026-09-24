@@ -78,6 +78,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const form = await req.formData();
   const file = form.get("file") as File;
   const changelog = form.get("changelog") as string;
+  const confirmDuplicate = form.get("confirmDuplicate") === "true";
+  const confirmedDuplicateOfId = form.get("duplicateOfId") as string | null;
 
   const maxRoundSoFar = await prisma.reviewRequest.aggregate({
     where: { documentId: doc.id },
@@ -107,6 +109,40 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const checksum = crypto.createHash("sha256").update(buffer).digest("hex");
+
+  // Duplicate check — before any storage write or DB row for this version,
+  // same "screen before committing" rule the fresh-upload route (POST
+  // /api/documents) already applies, rather than creating the version first
+  // and only flagging it as a duplicate after the fact. Content-only here
+  // (unlike the fresh-upload route's content-or-title check): this is a new
+  // FILE for an EXISTING document, so its title never changes and was never
+  // itself in question. Can be force-uploaded past with confirmDuplicate,
+  // same as a fresh upload, which re-derives the match server-side rather
+  // than trusting the client's claim of which document it matched.
+  const contentMatch = await prisma.documentVersion.findFirst({
+    where: { checksum, documentId: { not: doc.id }, document: { deletedAt: null } },
+    include: { document: true },
+  });
+  if (contentMatch && !(confirmDuplicate && confirmedDuplicateOfId === contentMatch.document.id)) {
+    return NextResponse.json(
+      {
+        duplicate: {
+          documentId: contentMatch.document.id,
+          title: contentMatch.document.title,
+          reason: DUPLICATE_REASON.content,
+        },
+      },
+      { status: 409 }
+    );
+  }
+  const wasContentDuplicate = doc.duplicateReason === DUPLICATE_REASON.content;
+  let duplicateUpdate: Partial<{ duplicateOfId: string | null; duplicateReason: string | null }> = {};
+  if (contentMatch) {
+    duplicateUpdate = { duplicateOfId: contentMatch.document.id, duplicateReason: DUPLICATE_REASON.content };
+  } else if (wasContentDuplicate) {
+    duplicateUpdate = { duplicateOfId: null, duplicateReason: null };
+  }
+
   const nextVersionNumber = Math.max(...doc.versions.map((v) => v.versionNumber)) + 1;
   const storageKey = buildStorageKey(
     doc.category.name.toLowerCase().replace(/\s+/g, "-"),
@@ -140,21 +176,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploadedById: user.id,
     },
   });
-
-  // Re-evaluate the content-duplicate flag against this new file too —
-  // "changes to the doc" (a new version, same as a title edit on PATCH)
-  // should re-run duplicate detection, not just the original upload.
-  const contentMatch = await prisma.documentVersion.findFirst({
-    where: { checksum, documentId: { not: doc.id }, document: { deletedAt: null } },
-    include: { document: true },
-  });
-  const wasContentDuplicate = doc.duplicateReason === DUPLICATE_REASON.content;
-  let duplicateUpdate: Partial<{ duplicateOfId: string | null; duplicateReason: string | null }> = {};
-  if (contentMatch) {
-    duplicateUpdate = { duplicateOfId: contentMatch.document.id, duplicateReason: DUPLICATE_REASON.content };
-  } else if (wasContentDuplicate) {
-    duplicateUpdate = { duplicateOfId: null, duplicateReason: null };
-  }
 
   // Document goes back to pending_review for the new version, but keeps
   // its previous currentVersionId until the new one is approved — the

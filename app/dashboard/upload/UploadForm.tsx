@@ -7,6 +7,7 @@ import BrandedLoader from "@/components/BrandedLoader";
 import DynamicField from "@/components/DynamicField";
 import AlertModal from "@/components/AlertModal";
 import InfoTooltip from "@/components/InfoTooltip";
+import Footer from "@/components/Footer";
 
 // Must match next.config.js's serverActions.bodySizeLimit — this is only a
 // client-side heads-up so the uploader isn't left waiting through a full
@@ -297,6 +298,7 @@ export default function UploadForm({
         </button>
       </form>
     </div>
+    <Footer />
     </main>
   );
 }

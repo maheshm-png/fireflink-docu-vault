@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import { prisma } from "@/lib/prisma";
 import type { CategoryFormField } from "@/lib/formSchema";
@@ -88,6 +89,7 @@ export default async function CategoriesPage() {
           })}
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

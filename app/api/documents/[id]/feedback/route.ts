@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
-import { everApprovedVersionIds } from "@/lib/versionRounds";
+import { everApprovedVersionIds, computeRoundAttempts } from "@/lib/versionRounds";
 import { notifyFeedbackTagged, fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
 
@@ -78,6 +78,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const trimmedSelection = typeof highlightedText === "string" ? highlightedText.trim() : "";
   const trimmedComment = comment.trim();
 
+  // The version this feedback is actually about — whichever one is live
+  // right now, same version isPubliclyVisible/hasEverPublished above already
+  // resolved this document to — labeled with the same Round.Attempt scheme
+  // (e.g. "v1.1") app/dashboard/documents/[id]/page.tsx's own versionLabel()
+  // uses for the Version History table, NOT the raw incrementing
+  // DocumentVersion.versionNumber: those two can disagree (a version whose
+  // raw number is 2 can be the one labeled "v1.1"), so showing the bare
+  // number here would read as a different, possibly not-yet-published
+  // version. Null for a docType "link" document (no versions at all).
+  const currentVersion = document.versions.find((v) => v.id === document.currentVersionId);
+  const versionLabel = currentVersion
+    ? computeRoundAttempts(document.versions, reviewRequests, document.revokedAt).byVersionId.get(currentVersion.id)
+        ?.label ?? `v${currentVersion.versionNumber}`
+    : null;
+
   const created = await prisma.documentFeedback.create({
     data: {
       documentId: params.id,
@@ -85,8 +100,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       highlightedText: trimmedSelection || null,
       comment: trimmedComment,
       taggedUserId: validTaggedUserId,
+      versionLabel,
     },
-    include: { user: { select: { name: true } }, taggedUser: { select: { name: true, role: true } } },
+    include: {
+      user: { select: { name: true } },
+      taggedUser: { select: { name: true, role: true } },
+      // Always empty for a brand new item (nothing to reply to yet), but
+      // still required by the shape components/DocumentFeedback.tsx's
+      // toItem() expects — without it, `f.replies` comes back `undefined`
+      // and `.map()` on it throws, which silently killed the whole "post
+      // succeeded" response client-side: the request had already saved to
+      // the DB, but the UI never got a usable item back to render.
+      replies: { include: { author: { select: { name: true, role: true } } } },
+    },
   });
 
   if (validTaggedUserId && validTaggedUserId !== user.id) {

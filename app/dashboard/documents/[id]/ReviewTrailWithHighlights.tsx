@@ -176,12 +176,17 @@ export default function ReviewTrailWithHighlights({
   // Rendered inside ReviewTrail's own "Document Comments" section (passed
   // down as a prop) rather than as a separate card after it — merges "read
   // the comments" and "see where they landed on the document" into one
-  // place. Available whenever there's a resolved version to show, whether
-  // or not that round actually has any highlighted-passage comments — a
-  // rejected attempt with only a plain decision reason (no highlights) used
-  // to have no way to open the document at all here, since this used to
-  // require highlights.length > 0.
-  const documentViewer = version && (
+  // place. A version with zero highlighted-passage comments has nothing to
+  // open here regardless of the document's status (published, still
+  // pending, or rejected) — showing the "click here to view the document as
+  // submitted" affordance anyway read as if a highlights viewer existed when
+  // it just didn't have anything in it. The whole section is left out
+  // entirely (not replaced with its own "no comments" line) rather than
+  // duplicating what ReviewTrail.tsx's "No Comments for this Version"
+  // fallback right above it already says.
+  const noComments = highlights.length === 0;
+
+  const documentViewer = version && !noComments && (
     highlightsOpen ? (
       <div ref={panelRef}>
         {/* Fixed to the viewport rather than sticky — this panel sits
@@ -247,9 +252,9 @@ export default function ReviewTrailWithHighlights({
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-ff-text">Reviewer Highlights</span>
           <span className="block text-xs text-ff-textMuted">
-            {highlights.length > 0
-              ? "Where reviewers' comments landed on the document. Click a comment above, or here, to view."
-              : "No highlighted comments for this version. Click here to view the document as submitted."}
+            {/* Only reachable when highlights.length > 0 — see `noComments`
+                above, which handles the zero-comments case on its own. */}
+            Where reviewers&apos; comments landed on the document. Click a comment above, or here, to view.
           </span>
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />

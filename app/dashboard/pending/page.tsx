@@ -6,6 +6,7 @@ import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import type { DocStatus } from "@prisma/client";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
 import ViewToggle from "@/components/ViewToggle";
@@ -220,6 +221,7 @@ export default async function ReviewDashboardPage({
 
         {searchParams.view === "grid" ? <DocumentGrid rows={rows} /> : <DocumentTable rows={rows} />}
         </div>
+        <Footer />
       </main>
     </div>
   );

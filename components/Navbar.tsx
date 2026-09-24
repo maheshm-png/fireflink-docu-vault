@@ -5,7 +5,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Home, Files, LayoutDashboard, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
-  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText, Mail,
+  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText, Mail, LayoutGrid,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
@@ -179,6 +179,7 @@ export default function Navbar({
     ...(role === "superadmin" ? [{ href: "/admin/users", label: "Manage Users", icon: Users }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/designations", label: "Designations", icon: IdCard }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/teams", label: "Teams", icon: UsersRound }] : []),
+    ...(role === "superadmin" ? [{ href: "/admin/workspace-apps", label: "Workspace Apps", icon: LayoutGrid }] : []),
   ];
 
   return (

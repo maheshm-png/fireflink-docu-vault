@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
 import AnnouncementManager from "./AnnouncementManager";
 
@@ -39,6 +40,7 @@ export default async function AnnouncementsPage() {
           }))}
         />
         </div>
+        <Footer />
       </main>
     </div>
   );

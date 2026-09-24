@@ -4,6 +4,7 @@ import { can } from "@/lib/rbac";
 import { search } from "@/lib/search";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import FilterBar from "@/components/FilterBar";
 import CategoryTabs from "@/components/CategoryTabs";
 import CategoryFieldFilters, { type FilterableField } from "@/components/CategoryFieldFilters";
@@ -212,6 +213,7 @@ export default async function DashboardPage({
           )}
         </NewDocumentsProvider>
         </div>
+        <Footer />
       </main>
     </div>
   );

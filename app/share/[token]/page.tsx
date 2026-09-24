@@ -81,7 +81,7 @@ export default async function SharePage({ params }: { params: { token: string } 
         <Logo variant="white" width={140} height={34} priority className="relative z-10" />
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-10">
+      <main className="mx-auto max-w-7xl px-6 py-10">
         <div className="relative mb-6 overflow-hidden rounded-ff border border-ff-border bg-white p-5 shadow-[0_16px_40px_-16px_rgba(58,29,66,0.28)] sm:p-6">
           {/* The full ff-plum-gradient token dips to near-black (#241026)
               at its dark end — fine across a full-height bar, but a 4px

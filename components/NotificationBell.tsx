@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus, XCircle, ThumbsUp, AtSign } from "lucide-react";
+import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus, XCircle, ThumbsUp, AtSign, Reply } from "lucide-react";
 import { formatDateTime } from "@/lib/formatDate";
 
 type NotificationItem = {
   id: string;
-  type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged";
+  type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied";
   title: string;
   body: string | null;
   documentId: string | null;
@@ -41,6 +41,7 @@ const TYPE_ICON: Record<NotificationItem["type"], typeof FileCheck> = {
   rejected: XCircle,
   feedback_accepted: ThumbsUp,
   feedback_tagged: AtSign,
+  feedback_replied: Reply,
 };
 
 export default function NotificationBell({ collapsed }: { collapsed: boolean }) {

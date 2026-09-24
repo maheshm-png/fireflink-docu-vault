@@ -410,6 +410,29 @@ export async function notifyFeedbackAccepted(params: {
 // those two things, not an arbitrary user). Same in-app-only scope as
 // notifyFeedbackAccepted above — a courtesy ping to one person, not a
 // document-lifecycle event.
+// A follow-up message (FeedbackReply) landed on a piece of feedback after
+// its first accept/close decision — see app/api/documents/[id]/feedback/
+// [feedbackId]/replies/route.ts. Same in-app-only, one-person courtesy scope
+// as notifyFeedbackAccepted above, not a document-lifecycle event.
+export async function notifyFeedbackReplied(params: {
+  documentTitle: string;
+  documentId: string;
+  authorId: string;
+  repliedByName: string;
+  comment: string;
+}) {
+  await createNotifications([
+    {
+      userId: params.authorId,
+      type: "feedback_replied",
+      title: `New reply on your feedback: ${params.documentTitle}`,
+      body: `${params.repliedByName}: ${params.comment}`,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    },
+  ]);
+}
+
 export async function notifyFeedbackTagged(params: {
   documentTitle: string;
   documentId: string;

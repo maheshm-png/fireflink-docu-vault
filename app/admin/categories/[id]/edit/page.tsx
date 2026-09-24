@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import CategoryFormBuilder from "../../CategoryFormBuilder";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +37,7 @@ export default async function EditCategoryPage({ params }: { params: { id: strin
         />
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

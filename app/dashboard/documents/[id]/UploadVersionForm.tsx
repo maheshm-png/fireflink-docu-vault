@@ -46,26 +46,38 @@ export default function UploadVersionForm({
   const [changelog, setChangelog] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ documentId: string; title: string; reason: string } | null>(null);
 
   function reset() {
     setOpen(false);
     setFile(null);
     setChangelog("");
     setError(null);
+    setDuplicateWarning(null);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitUpload(forceDuplicateOfId?: string) {
     if (!file) return setError("Choose a file to upload.");
-
     setSubmitting(true);
     setError(null);
     const form = new FormData();
     form.set("file", file);
     form.set("changelog", changelog);
+    if (forceDuplicateOfId) {
+      form.set("confirmDuplicate", "true");
+      form.set("duplicateOfId", forceDuplicateOfId);
+    }
 
     const res = await fetch(`/api/documents/${documentId}/versions`, { method: "POST", body: form });
     setSubmitting(false);
+
+    if (res.status === 409) {
+      const data = await res.json().catch(() => null);
+      if (data?.duplicate) {
+        setDuplicateWarning(data.duplicate);
+        return;
+      }
+    }
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -75,6 +87,12 @@ export default function UploadVersionForm({
 
     reset();
     router.refresh();
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setDuplicateWarning(null);
+    await submitUpload();
   }
 
   return (
@@ -134,6 +152,43 @@ export default function UploadVersionForm({
               />
             </div>
 
+            {duplicateWarning && (
+              <div className="mb-4 rounded-ff border border-ff-warning/40 bg-ff-warning/10 p-3 text-xs text-ff-text">
+                <p className="mb-1 font-medium">Possible duplicate</p>
+                <p className="mb-2 text-ff-textMuted">
+                  {duplicateWarning.reason} Existing document:{" "}
+                  <a
+                    href={`/dashboard/documents/${duplicateWarning.documentId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-ff-accent hover:underline"
+                  >
+                    {duplicateWarning.title}
+                  </a>
+                  . If this is genuinely different content, you can upload it anyway. It will be marked as a
+                  possible duplicate so reviewers and other users can see it.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => submitUpload(duplicateWarning.documentId)}
+                    className="flex items-center justify-center rounded-ff bg-ff-warning px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    {submitting ? <BrandedLoader size={14} variant="white" /> : "Upload Anyway"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setDuplicateWarning(null)}
+                    className="rounded-ff border border-ff-border px-3 py-1.5 text-xs text-ff-text transition-colors hover:bg-ff-lavender"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -145,7 +200,7 @@ export default function UploadVersionForm({
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !!duplicateWarning}
                 className="flex items-center justify-center rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105 disabled:opacity-60"
               >
                 {submitting ? <BrandedLoader size={16} variant="white" label="Uploading..." /> : "Submit for Review"}

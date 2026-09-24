@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import { prisma } from "@/lib/prisma";
 import TeamManager from "./TeamManager";
@@ -33,6 +34,7 @@ export default async function TeamsPage() {
           initialTeams={teams.map((t) => ({ id: t.id, name: t.name, userCount: t._count.users }))}
         />
         </div>
+        <Footer />
       </main>
     </div>
   );

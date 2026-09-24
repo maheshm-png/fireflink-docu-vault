@@ -8,7 +8,7 @@ import { prisma } from "./prisma";
 export async function createNotifications(
   items: {
     userId: string;
-    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged";
+    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied";
     title: string;
     body?: string;
     documentId?: string;

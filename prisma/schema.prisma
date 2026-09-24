@@ -107,6 +107,7 @@ model User {
   feedbackAuthored    DocumentFeedback[] @relation("FeedbackAuthor")
   feedbackStatusChanged DocumentFeedback[] @relation("FeedbackStatusChangedBy")
   feedbackTagged      DocumentFeedback[] @relation("FeedbackTaggedUser")
+  feedbackRepliesSent FeedbackReply[]
 }
 
 // Admin-managed job-title options for User.designation (app/admin/
@@ -131,6 +132,30 @@ model Designation {
   createdAt DateTime @default(now())
 
   users     User[]
+}
+
+// A tile on the FireFlink Workspace launcher (app/page.tsx, the public
+// pre-login hub) — superadmin-managed from app/admin/workspace-apps, see
+// lib/rbac.ts's manageWorkspaceApps permission. `icon` is a key into a
+// fixed lookup (lib/workspaceIcons.ts), not a component — Prisma/Postgres
+// obviously can't store a React component, and a fixed picklist keeps every
+// tile's icon visually consistent with the rest of the app's icon set
+// rather than admins hand-typing arbitrary icon library names.
+model WorkspaceApp {
+  id          String   @id @default(uuid())
+  name        String
+  category    String
+  description String
+  // Null = not launched yet, renders as a non-clickable "Coming Soon" tile
+  // instead of a link (see app/page.tsx's AppTile).
+  href        String?
+  icon        String
+  // Display order on the launcher grid, lowest first — a plain sortable int
+  // rather than relying on createdAt, so reordering existing tiles doesn't
+  // require deleting and re-adding them.
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Category {
@@ -561,6 +586,54 @@ model DocumentFeedback {
   // general feedback, nobody tagged.
   taggedUserId    String?
   taggedUser      User?  @relation("FeedbackTaggedUser", fields: [taggedUserId], references: [id])
+  replies         FeedbackReply[]
+  // Ready-to-render Round.Attempt label (e.g. "v1.1") for whichever version
+  // was actually live/current on the document when this feedback was
+  // posted — the SAME lib/versionRounds.ts computeRoundAttempts label the
+  // Version History table shows, not the raw incrementing DocumentVersion.
+  // versionNumber, which can disagree with it (a version whose raw number is
+  // 2 can be labeled "v1.1", not "v2" — a bare number here read as if it
+  // were that label and was actively misleading). Computed once at POST
+  // time (see the feedback route) rather than resolved from a stored
+  // versionId later, matching how app/api/documents/[id]/versions/route.ts
+  // already computes this same label once, at the moment it's needed, for
+  // its own notification. Null for feedback left before this field existed,
+  // or on a document with no versions at all (docType "link").
+  versionLabel    String?
 
   @@index([documentId])
+}
+
+// Follow-up messages on a piece of feedback, after the first accept/close
+// decision (DocumentFeedback.status + responseNote above) — that first
+// decision is a real action (it's what the feedback's author is actually
+// waiting on), but a back-and-forth after that shouldn't force the uploader/
+// manager to re-pick a status every time they just want to say one more
+// thing. Posting one of these never changes DocumentFeedback.status; it's
+// purely additive to the thread. Only ever addable by whoever could have
+// triaged the item in the first place (see the same canTriage rule in
+// app/api/documents/[id]/feedback/[feedbackId]/route.ts), and only once that
+// first decision has actually been made (status is no longer "open") — see
+// the replies route's own enforcement of both.
+model FeedbackReply {
+  id         String   @id @default(uuid())
+  // Cascade, not restrict — DocumentFeedback's own DELETE route (see
+  // app/api/documents/[id]/feedback/[feedbackId]/route.ts) lets the author
+  // or a moderator remove a feedback item outright at any time, replies and
+  // all; without this a feedback item that had picked up any replies would
+  // become permanently undeletable (a bare FK violation) the moment someone
+  // tried.
+  feedback   DocumentFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  feedbackId String
+  author     User     @relation(fields: [authorId], references: [id])
+  authorId   String
+  comment    String
+  createdAt  DateTime @default(now())
+  // Set once the reply's own author edits its text — same "(edited)" marker
+  // convention as InlineComment.editedAt and DocumentFeedback.editedAt, not
+  // offered to anyone else (a manager editing someone else's wording has no
+  // visible attribution that it happened, same reasoning as those two).
+  editedAt   DateTime?
+
+  @@index([feedbackId])
 }

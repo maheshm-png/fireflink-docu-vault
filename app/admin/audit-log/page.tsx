@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
 import { LocalDateTime } from "@/components/LocalDateTime";
 
@@ -66,6 +67,7 @@ export default async function AuditLogPage() {
           </table>
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

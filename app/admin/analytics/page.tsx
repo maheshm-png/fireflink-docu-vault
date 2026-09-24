@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
 import { FileCheck, Clock, XCircle, Archive, RotateCcw, AlertTriangle, Trash2, Eye, Download, type LucideIcon } from "lucide-react";
 
@@ -115,6 +116,7 @@ export default async function AnalyticsPage() {
           />
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

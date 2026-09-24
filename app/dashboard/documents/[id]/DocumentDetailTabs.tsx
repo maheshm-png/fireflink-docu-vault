@@ -35,8 +35,21 @@ export type DetailTab = {
  * conditionals the old flat layout used — this component only decides how
  * to group and switch between them, not who gets to see what.
  */
-export default function DocumentDetailTabs({ tabs }: { tabs: DetailTab[] }) {
-  const [active, setActive] = useState(tabs[0]?.key);
+export default function DocumentDetailTabs({
+  tabs,
+  defaultTabKey,
+}: {
+  tabs: DetailTab[];
+  // Which tab opens first, independent of tab button order (order is its
+  // own separate design decision — see the comments in page.tsx on why
+  // Review comes before Versions there). Falls back to the first tab when
+  // the requested key isn't present for this document (e.g. an external-
+  // link document has no Versions tab at all).
+  defaultTabKey?: string;
+}) {
+  const [active, setActive] = useState(
+    () => tabs.find((t) => t.key === defaultTabKey)?.key ?? tabs[0]?.key
+  );
 
   // Panels toggle via CSS visibility (see the comment below), not mount/
   // unmount, and this component itself doesn't remount just because its

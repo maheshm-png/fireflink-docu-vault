@@ -4,6 +4,7 @@ import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronL
 import { getCurrentUser } from "@/lib/supabase";
 import { can, type Role } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import DocTypeIcon from "@/components/DocTypeIcon";
 import Badge from "@/components/Badge";
 import { prisma } from "@/lib/prisma";
@@ -365,6 +366,7 @@ export default async function DocumentDetailPage({
           user: { select: { name: true } },
           statusChangedBy: { select: { name: true, role: true } },
           taggedUser: { select: { name: true, role: true } },
+          replies: { include: { author: { select: { name: true, role: true } } }, orderBy: { createdAt: "asc" } },
         },
         orderBy: { createdAt: "asc" },
       })
@@ -832,22 +834,7 @@ export default async function DocumentDetailPage({
                 at least once — feedback can never exist before that (see
                 the feedback POST route's own status check). */}
             {canManageFeedback && hasEverPublished && (
-              <FeedbackManagement
-                documentId={document.id}
-                myUserId={user.id}
-                initialFeedbackEnabled={document.feedbackEnabled}
-                items={feedback.map((f) => ({
-                  id: f.id,
-                  authorId: f.userId,
-                  comment: f.comment,
-                  authorName: f.user.name,
-                  status: f.status,
-                  responseNote: f.responseNote,
-                  statusChangedByName: f.statusChangedBy?.name ?? null,
-                  statusChangedByRole: f.statusChangedBy?.role ?? null,
-                  taggedUserName: f.taggedUser?.name ?? null,
-                }))}
-              />
+              <FeedbackManagement documentId={document.id} initialFeedbackEnabled={document.feedbackEnabled} />
             )}
 
             {/* Only meaningful once the document's actually been published
@@ -895,9 +882,22 @@ export default async function DocumentDetailPage({
           documentId={document.id}
           myUserId={user.id}
           canModerate={user.role === "manager" || user.role === "superadmin"}
+          canTriage={canManageFeedback}
           feedbackEnabled={document.feedbackEnabled}
           taggableUsers={taggableUsers}
-          initialFeedback={feedback.map((f) => ({ ...f, editedAt: f.editedAt?.toISOString() ?? null }))}
+          initialFeedback={feedback.map((f) => ({
+            ...f,
+            editedAt: f.editedAt?.toISOString() ?? null,
+            replies: f.replies.map((r) => ({
+              id: r.id,
+              authorId: r.authorId,
+              authorName: r.author.name,
+              authorRole: r.author.role as Role,
+              comment: r.comment,
+              editedAt: r.editedAt?.toISOString() ?? null,
+              createdAt: r.createdAt.toISOString(),
+            })),
+          }))}
         />
       ),
     });
@@ -1120,8 +1120,9 @@ export default async function DocumentDetailPage({
         )}
         </div>
 
-        <DocumentDetailTabs tabs={tabs} />
+        <DocumentDetailTabs tabs={tabs} defaultTabKey="versions" />
         </div>
+        <Footer />
       </main>
     </div>
   );

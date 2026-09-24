@@ -111,31 +111,43 @@ html, body {
   animation: introFadeOut 0.6s ease-in forwards;
 }
 
+/* app/WorkspaceIntro.tsx's own splash — the logo scales/fades up out of its
+   glow rather than just appearing, since login's plain fade-in (the logo
+   there sits on a plain white splash, no glow to emerge from) would read as
+   flat against this splash's soft radial glow behind it. The "Welcome to..."
+   line reuses introTypeReveal/animate-intro-logo-in above (a second copy
+   would just be this same keyframe with a different name), timed to start
+   once the logo's own entrance has mostly finished via animation-delay set
+   inline rather than a second class. */
+@keyframes workspaceIntroLogoIn {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-workspace-intro-logo {
+  animation: workspaceIntroLogoIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* Big background brand mark on plum panels (components/PlumWatermark.tsx).
    Its dim fill is always visible (plain opacity, no animation — that part
    must never distract from foreground text). This animation drives the
    occasional "spark": a bright line runs once around each shape's own
    outline (stroke-dasharray "14 86" on a pathLength=100 path means a
    segment covering 14% of its edge chases around it as dashoffset counts
-   down from 100 to 0), then eases back out slowly rather than cutting off.
-   The long 0-70% idle hold before any of that starts is deliberate: a
-   constant glow would compete with foreground text, an occasional one
-   reads as a quiet brand detail instead. */
+   down from 100 to 0). 6s total, split evenly: a 3s dark gap (0-50%)
+   before anything starts — a constant glow would compete with foreground
+   text, an occasional one reads as a quiet brand detail instead — then a
+   quick ramp-in and a single continuous glow-while-traveling motion: no
+   flat "fully lit" hold once it's drawn, it fades out DURING the same
+   travel, reaching opacity 0 exactly as it completes the loop.  */
 @keyframes plumWatermarkTrace {
-  0%, 70% {
+  0%, 50% {
     opacity: 0;
     stroke-dashoffset: 100;
   }
-  74% {
+  55% {
     opacity: 1;
-  }
-  84% {
-    opacity: 1;
-    stroke-dashoffset: 0;
-  }
-  92.5% {
-    opacity: 0;
-    stroke-dashoffset: 0;
+    stroke-dashoffset: 95;
   }
   100% {
     opacity: 0;
@@ -145,7 +157,7 @@ html, body {
 
 .plum-watermark-trace {
   stroke-dasharray: 14 86;
-  animation: plumWatermarkTrace 9s ease-in-out infinite;
+  animation: plumWatermarkTrace 6s ease-in-out infinite;
 }
 
 /* Keeps the sidebar nav (components/Navbar.tsx) scrollable when its item

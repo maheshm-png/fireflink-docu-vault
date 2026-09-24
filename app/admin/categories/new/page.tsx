@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import CategoryFormBuilder from "../CategoryFormBuilder";
 
 export default async function NewCategoryPage() {
@@ -19,6 +20,7 @@ export default async function NewCategoryPage() {
         <CategoryFormBuilder mode="create" />
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

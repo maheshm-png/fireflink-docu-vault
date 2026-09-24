@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
@@ -71,6 +72,7 @@ export default async function RevokedDocumentsPage({
         </div>
         {searchParams.view === "grid" ? <DocumentGrid rows={rows} /> : <DocumentTable rows={rows} />}
         </div>
+        <Footer />
       </main>
     </div>
   );

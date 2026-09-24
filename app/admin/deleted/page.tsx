@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
 import { LocalDateTime } from "@/components/LocalDateTime";
 import RestoreButton from "./RestoreButton";
@@ -82,6 +83,7 @@ export default async function DeletedDocumentsPage() {
           </div>
         )}
         </div>
+        <Footer />
       </main>
     </div>
   );

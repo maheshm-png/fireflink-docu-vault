@@ -1,9 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, Pencil, X, ChevronDown, ChevronUp, AtSign } from "lucide-react";
+import { Trash2, Pencil, X, ChevronDown, ChevronUp, AtSign, CheckCircle2, XCircle, RotateCcw, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
+
+// A single entry in a feedback item's reply thread — see
+// PanelItem.replies' own comment for what this covers and doesn't.
+export type ThreadReply = {
+  id: string;
+  authorName: string;
+  // Null only for the synthetic "decision" entry threadReplies() below
+  // builds from an item's responseNote, when the role wasn't resolvable.
+  authorRole: Role | null;
+  comment: string;
+  editedAt?: string | null;
+  canEdit?: boolean;
+};
 
 export type PanelItem = {
   id: string;
@@ -29,10 +42,10 @@ export type PanelItem = {
   // so a viewer isn't misled into thinking the text is exactly what was
   // first written.
   editedAt?: string | null;
-  // Manage-tab triage state (components/FeedbackManagement.tsx) — only ever
-  // set by DocumentFeedback.tsx; every other caller omits it and renders no
-  // badge, same as before this existed. Absent/undefined means "open" (no
-  // badge shown for that state, only for a real decision either way).
+  // Feedback triage state (components/DocumentFeedback.tsx) — only ever set
+  // by that caller; every other caller omits it and renders no badge, same
+  // as before this existed. Absent/undefined means "open" (no badge shown
+  // for that state, only for a real decision either way).
   status?: "accepted" | "closed";
   // The reply left alongside that status change (same source) — shown right
   // under the badge when present, so the person who left the feedback sees
@@ -46,12 +59,62 @@ export type PanelItem = {
   // document (its contributor, or a reviewer) — see DocumentFeedback.tsx's
   // tag picker. Only ever set by that same caller.
   taggedUserName?: string | null;
+  // Which document version was live when this was posted — a ready-to-
+  // render label (e.g. "v3"), already formatted by the caller rather than a
+  // raw number, same as taggedUserName above. Only DocumentFeedback.tsx sets
+  // this; null when unknown (feedback from before this was tracked, or a
+  // docType with no versions at all).
+  versionLabel?: string | null;
+  // Follow-up messages after the first accept/close decision (`responseNote`
+  // above is the first one). Undefined (not just empty) right after adding/
+  // editing an item in THIS session, since the add API response doesn't
+  // include replies yet (a brand new item never has any) — always treated
+  // the same as an empty list.
+  replies?: ThreadReply[];
+  // Whether the CURRENT viewer can accept/close/reply to THIS item — the
+  // same canTriage rule the feedback API enforces (a manager/superadmin, or
+  // this document's own uploader), already excluding the item's own author
+  // (see DocumentFeedback.tsx's computation). Only DocumentFeedback.tsx ever
+  // sets this or the two fields below; every other caller omits all three
+  // and gets none of this UI.
+  canTriage?: boolean;
+  // True when the viewer generally CAN triage feedback on this document but
+  // not THIS item specifically, because they're the one who wrote it — used
+  // only to show a small explanatory note ("someone else needs to accept or
+  // close it") instead of silently showing nothing.
+  isOwnFeedbackForATriager?: boolean;
 };
 
 const STATUS_BADGE: Record<"accepted" | "closed", { label: string; className: string }> = {
   accepted: { label: "Accepted", className: "bg-ff-success/15 text-ff-success" },
   closed: { label: "Closed", className: "bg-ff-textMuted/15 text-ff-textMuted" },
 };
+
+// The first accept/close decision (`responseNote` + whoever set the status)
+// and every follow-up (`replies`) are stored as separate fields, but read as
+// one continuous conversation — rendering them with two different card
+// styles (one with no author shown, one with) made it look like two
+// unrelated features bolted together rather than a single thread. This
+// folds both into one ordered list so every entry, first or later, renders
+// identically.
+function threadReplies(item: PanelItem): ThreadReply[] {
+  // Not editable through this thread's own edit control — the decision
+  // note is a different underlying field (DocumentFeedback.responseNote),
+  // changed by re-triaging (Reopen, then decide again), not by editing text
+  // in place.
+  const first: ThreadReply[] = item.responseNote
+    ? [
+        {
+          id: "decision",
+          authorName: item.statusChangedByName ?? "Unknown",
+          authorRole: item.statusChangedByRole ?? null,
+          comment: item.responseNote,
+          canEdit: false,
+        },
+      ]
+    : [];
+  return [...first, ...(item.replies ?? [])];
+}
 
 type Segment =
   | { type: "text"; content: string }
@@ -123,6 +186,9 @@ export default function HighlightCommentPanel({
   onAdd,
   onEdit,
   onDelete,
+  onSetStatus,
+  onSendReply,
+  onEditReply,
   icon: Icon,
   heading,
   description,
@@ -131,6 +197,7 @@ export default function HighlightCommentPanel({
   focusRequest,
   collapsible = false,
   taggableUsers,
+  embedded = false,
 }: {
   text: string;
   initialItems: PanelItem[];
@@ -141,6 +208,27 @@ export default function HighlightCommentPanel({
   }) => Promise<{ ok: true; item: PanelItem } | { ok: false; error: string }>;
   onEdit?: (id: string, comment: string) => Promise<{ ok: true; item: PanelItem } | { ok: false; error: string }>;
   onDelete?: (id: string) => Promise<boolean>;
+  // The first accept/close decision on an item (with its optional reply
+  // note) — status is "open" to reopen an already-decided item back to
+  // untriaged. Only DocumentFeedback.tsx passes this; every other caller
+  // omits it, and no item of theirs ever has `canTriage: true` anyway.
+  onSetStatus?: (
+    id: string,
+    status: "open" | "accepted" | "closed",
+    responseNote: string | null
+  ) => Promise<{ ok: true; item: PanelItem } | { ok: false; error: string }>;
+  // A follow-up message after that first decision — see PanelItem.replies'
+  // own comment for why this never touches status.
+  onSendReply?: (id: string, comment: string) => Promise<{ ok: true; reply: ThreadReply } | { ok: false; error: string }>;
+  // Editing the text of a reply already in the thread — the reply's own
+  // author only (see ThreadReply.canEdit), same as onEdit above is for the
+  // item's own comment. Takes both ids since a reply doesn't belong to the
+  // panel's flat item list on its own.
+  onEditReply?: (
+    itemId: string,
+    replyId: string,
+    comment: string
+  ) => Promise<{ ok: true; reply: ThreadReply } | { ok: false; error: string }>;
   icon: LucideIcon;
   heading: string;
   description: string;
@@ -167,6 +255,14 @@ export default function HighlightCommentPanel({
   // whose page already has several large sections stacked (see
   // components/InlineCommentReview.tsx). Off by default.
   collapsible?: boolean;
+  // Drops this panel's own card chrome (border/shadow/margin) — for a
+  // caller that already renders it inside another bordered card (see
+  // components/ReviewHighlightsViewer.tsx, nested inside app/dashboard/
+  // documents/[id]/ReviewTrail.tsx's "Document Comments" card), where the
+  // full card-in-a-card-in-a-card look was the actual complaint this was
+  // added for. Off by default — every other caller renders this as its own
+  // standalone top-level section and still wants the card.
+  embedded?: boolean;
 }) {
   const [items, setItems] = useState<PanelItem[]>(initialItems);
   // Set once someone's actually picked from the @mention dropdown below —
@@ -215,6 +311,21 @@ export default function HighlightCommentPanel({
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // Triage (accept/close/reopen + follow-up replies) — keyed by item id
+  // since more than one item's controls can be visible on screen at once,
+  // unlike editingItemId above (only one item is ever mid-edit).
+  const [statusNoteDrafts, setStatusNoteDrafts] = useState<Record<string, string>>({});
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [replyBusyId, setReplyBusyId] = useState<string | null>(null);
+  const [triageError, setTriageError] = useState<Record<string, string | null>>({});
+  // Editing a reply already in the thread — a global "which one" (not keyed
+  // by item id) since only one reply can ever be mid-edit at a time, same as
+  // editingItemId above for the item's own comment.
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
+  const [editReplyDraft, setEditReplyDraft] = useState("");
+  const [editReplySubmitting, setEditReplySubmitting] = useState(false);
+  const [editReplyError, setEditReplyError] = useState<string | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const markRefs = useRef<Record<string, HTMLElement | null>>({});
   // jumpToItem's own scrollIntoView fires scroll events on textRef while it
@@ -380,6 +491,68 @@ export default function HighlightCommentPanel({
     }
   }
 
+  async function setItemStatus(id: string, status: "open" | "accepted" | "closed") {
+    if (!onSetStatus) return;
+    setStatusBusyId(id);
+    setTriageError((prev) => ({ ...prev, [id]: null }));
+    const responseNote = statusNoteDrafts[id]?.trim() || null;
+    const res = await onSetStatus(id, status, responseNote);
+    setStatusBusyId(null);
+    if (!res.ok) {
+      setTriageError((prev) => ({ ...prev, [id]: res.error }));
+      return;
+    }
+    setItems((prev) => prev.map((it) => (it.id === id ? res.item : it)));
+  }
+
+  async function sendItemReply(id: string) {
+    if (!onSendReply) return;
+    const comment = (replyDrafts[id] ?? "").trim();
+    if (!comment) return;
+    setReplyBusyId(id);
+    setTriageError((prev) => ({ ...prev, [id]: null }));
+    const res = await onSendReply(id, comment);
+    setReplyBusyId(null);
+    if (!res.ok) {
+      setTriageError((prev) => ({ ...prev, [id]: res.error }));
+      return;
+    }
+    setItems((prev) =>
+      prev.map((it) => (it.id === id ? { ...it, replies: [...(it.replies ?? []), res.reply] } : it))
+    );
+    setReplyDrafts((prev) => ({ ...prev, [id]: "" }));
+  }
+
+  function startEditReply(replyId: string, currentComment: string) {
+    setEditingReplyId(replyId);
+    setEditReplyDraft(currentComment);
+    setEditReplyError(null);
+  }
+
+  function cancelEditReply() {
+    setEditingReplyId(null);
+    setEditReplyDraft("");
+    setEditReplyError(null);
+  }
+
+  async function saveReplyEdit(itemId: string, replyId: string) {
+    if (!onEditReply || !editReplyDraft.trim()) return;
+    setEditReplySubmitting(true);
+    setEditReplyError(null);
+    const res = await onEditReply(itemId, replyId, editReplyDraft.trim());
+    setEditReplySubmitting(false);
+    if (!res.ok) {
+      setEditReplyError(res.error);
+      return;
+    }
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId ? { ...it, replies: (it.replies ?? []).map((r) => (r.id === replyId ? res.reply : r)) } : it
+      )
+    );
+    cancelEditReply();
+  }
+
   function jumpToItem(id: string) {
     const el = markRefs.current[id];
     if (el) {
@@ -443,7 +616,7 @@ export default function HighlightCommentPanel({
 
   return (
     <>
-    <section className="mb-6 rounded-ff border border-ff-border bg-white p-4 shadow-ff">
+    <section className={embedded ? "" : "mb-6 rounded-ff border border-ff-border bg-white p-4 shadow-ff"}>
       <div className="mb-1 flex items-center justify-between">
         <h2 className="flex items-center gap-1.5 text-base font-bold text-ff-text">
           <Icon className="h-4 w-4" aria-hidden />
@@ -772,10 +945,18 @@ export default function HighlightCommentPanel({
                       </span>
                     )}
                     <div className="min-w-0 flex-1">
-                      {(item.authorLabel || item.status || item.taggedUserName) && (
+                      {(item.authorLabel || item.status || item.taggedUserName || item.versionLabel) && (
                         <div className="mb-1 flex flex-wrap items-center gap-1.5">
                           {item.authorLabel && (
                             <span className="text-xs font-semibold text-ff-text">{item.authorLabel}</span>
+                          )}
+                          {item.versionLabel && (
+                            <span
+                              title={`Given on ${item.versionLabel}`}
+                              className="rounded-full bg-ff-lavender px-1.5 py-0.5 text-[10px] font-medium text-ff-textMuted"
+                            >
+                              {item.versionLabel}
+                            </span>
                           )}
                           {item.taggedUserName && (
                             <span
@@ -797,16 +978,169 @@ export default function HighlightCommentPanel({
                         {item.comment}
                         {item.editedAt && <span className="ml-1 text-xs italic text-ff-textMuted">(edited)</span>}
                       </p>
-                      {item.responseNote && (
-                        <p className="mt-1.5 rounded-ff border-l-[3px] border-l-ff-accent bg-ff-lavender/40 px-2.5 py-1.5 text-xs text-ff-text">
-                          {item.responseNote}
-                        </p>
-                      )}
-                      {item.status && item.statusChangedByName && (
+                      {item.status && !item.responseNote && item.statusChangedByName && (
+                        // No note was left with the decision — nothing to
+                        // show in the thread below, so this is the only
+                        // record of who decided and when.
                         <p className="mt-1 text-[11px] text-ff-textMuted">
                           {STATUS_BADGE[item.status].label} by {item.statusChangedByName}
                           {item.statusChangedByRole && ` (${ROLE_LABELS[item.statusChangedByRole]})`}
                         </p>
+                      )}
+                      {threadReplies(item).length > 0 && (
+                        <ul className="mt-1.5 space-y-1.5 border-l-2 border-ff-accent/30 pl-2.5">
+                          {threadReplies(item).map((r) =>
+                            editingReplyId === r.id ? (
+                              <li key={r.id} className="rounded-ff border border-ff-border bg-white p-2">
+                                <input
+                                  autoFocus
+                                  value={editReplyDraft}
+                                  onChange={(e) => setEditReplyDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveReplyEdit(item.id, r.id);
+                                    if (e.key === "Escape") cancelEditReply();
+                                  }}
+                                  className="mb-1.5 w-full rounded-ff border border-ff-border px-2 py-1 text-xs"
+                                />
+                                {editReplyError && <p className="mb-1.5 text-[11px] text-ff-danger">{editReplyError}</p>}
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveReplyEdit(item.id, r.id)}
+                                    disabled={editReplySubmitting || !editReplyDraft.trim()}
+                                    className="rounded-ff bg-ff-accent-gradient px-2 py-1 text-[11px] font-medium text-white shadow-ff disabled:opacity-60"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditReply}
+                                    className="rounded-ff border border-ff-border px-2 py-1 text-[11px] text-ff-text hover:bg-ff-lavender/40"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </li>
+                            ) : (
+                              <li
+                                key={r.id}
+                                className="group flex items-start justify-between gap-1.5 rounded-ff bg-ff-lavender/40 px-2.5 py-1.5 text-xs text-ff-text"
+                              >
+                                <span>
+                                  <span className="font-semibold">{r.authorName}</span>
+                                  {r.authorRole && <span className="text-ff-textMuted"> ({ROLE_LABELS[r.authorRole]})</span>}
+                                  {": "}
+                                  {r.comment}
+                                  {r.editedAt && <span className="ml-1 text-[10px] italic text-ff-textMuted">(edited)</span>}
+                                </span>
+                                {r.canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditReply(r.id, r.comment)}
+                                    title="Edit reply"
+                                    aria-label="Edit reply"
+                                    className="shrink-0 rounded p-0.5 text-ff-textMuted opacity-0 transition-opacity hover:text-ff-accent group-hover:opacity-100"
+                                  >
+                                    <Pencil className="h-3 w-3" aria-hidden />
+                                  </button>
+                                )}
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      )}
+
+                      {item.isOwnFeedbackForATriager && (
+                        <p className="mt-2 text-xs italic text-ff-textMuted">
+                          This is your own feedback. Someone else needs to accept or close it.
+                        </p>
+                      )}
+
+                      {item.canTriage && !item.status && (
+                        // First decision — the one action this feedback's
+                        // author is actually waiting on, so it's the only
+                        // reply here that requires picking Accept or Close.
+                        <div className="mt-2">
+                          <input
+                            value={statusNoteDrafts[item.id] ?? ""}
+                            onChange={(e) => setStatusNoteDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            placeholder="Add a reply note (optional), sent with your decision"
+                            disabled={statusBusyId === item.id}
+                            className="mb-2 w-full rounded-ff border border-ff-border px-2.5 py-1.5 text-xs disabled:opacity-60"
+                          />
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setItemStatus(item.id, "accepted")}
+                              disabled={statusBusyId === item.id}
+                              className="flex items-center gap-1 rounded-ff border border-ff-border px-2.5 py-1 text-xs text-ff-text transition-colors hover:border-ff-success/40 hover:bg-ff-success/10 hover:text-ff-success disabled:opacity-60"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                              Accept
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setItemStatus(item.id, "closed")}
+                              disabled={statusBusyId === item.id}
+                              className="flex items-center gap-1 rounded-ff border border-ff-border px-2.5 py-1 text-xs text-ff-text transition-colors hover:bg-ff-lavender disabled:opacity-60"
+                            >
+                              <XCircle className="h-3.5 w-3.5" aria-hidden />
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {item.canTriage && item.status && (
+                        // Already decided once — every reply from here on is
+                        // just conversation: one input, one send icon,
+                        // posted instantly with no status picker to wait on.
+                        // Reopen (a real status change) stays available as
+                        // its own small action below, not mixed into sending
+                        // a reply. Closed is treated as done, not just
+                        // another ongoing state — the thread stays readable
+                        // but no new reply can be sent until it's reopened.
+                        <div className="mt-2">
+                          {item.status === "accepted" ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={replyDrafts[item.id] ?? ""}
+                                onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                onKeyDown={(e) => e.key === "Enter" && sendItemReply(item.id)}
+                                placeholder="Send another reply..."
+                                disabled={replyBusyId === item.id}
+                                className="min-w-0 flex-1 rounded-ff border border-ff-border px-2.5 py-1.5 text-xs disabled:opacity-60"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => sendItemReply(item.id)}
+                                disabled={replyBusyId === item.id || !(replyDrafts[item.id] ?? "").trim()}
+                                title="Send reply"
+                                aria-label="Send reply"
+                                className="shrink-0 rounded-ff bg-ff-accent-gradient p-1.5 text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105 disabled:opacity-60"
+                              >
+                                <Send className="h-3.5 w-3.5" aria-hidden />
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] italic text-ff-textMuted">
+                              This feedback is closed. Reopen it to send another reply.
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setItemStatus(item.id, "open")}
+                            disabled={statusBusyId === item.id}
+                            className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-ff-textMuted transition-colors hover:text-ff-text disabled:opacity-60"
+                          >
+                            <RotateCcw className="h-3 w-3" aria-hidden />
+                            Reopen
+                          </button>
+                        </div>
+                      )}
+
+                      {triageError[item.id] && (
+                        <p className="mt-1.5 text-xs text-ff-danger">{triageError[item.id]}</p>
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">

@@ -75,6 +75,11 @@ export default function ReviewHighlightsViewer({
         icon={MessageSquareQuote}
         heading="Reviewer Highlights"
         description="Where reviewers' comments landed on the document. Click a comment to jump to it."
+        // Always nested inside ReviewTrail.tsx's own "Document Comments"
+        // card (see app/dashboard/documents/[id]/ReviewTrailWithHighlights.tsx)
+        // — this component's only caller — so its own card border/shadow
+        // would just be a redundant box inside a box.
+        embedded
       />
     );
   }
@@ -88,6 +93,7 @@ export default function ReviewHighlightsViewer({
       icon={MessageSquareQuote}
       heading="Reviewer Highlights"
       description="Where reviewers' comments landed on the document. Click a comment to jump to it."
+      embedded
     />
   );
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import InviteUserForm from "./InviteUserForm";
 import RoleSelect from "./RoleSelect";
 import DesignationSelect from "./DesignationSelect";
@@ -153,6 +154,7 @@ export default async function ManageUsersPage({
           ))}
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );

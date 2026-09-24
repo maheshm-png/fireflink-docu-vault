@@ -122,7 +122,16 @@ export async function PATCH(
   const updated = await prisma.documentFeedback.update({
     where: { id: params.feedbackId },
     data,
-    include: { user: { select: { name: true } }, statusChangedBy: { select: { name: true, role: true } } },
+    include: {
+      user: { select: { name: true } },
+      statusChangedBy: { select: { name: true, role: true } },
+      // Without this, editing just the comment text (the `comment` branch
+      // above) would return a `replies: undefined` row, and the client
+      // (components/DocumentFeedback.tsx's onEdit) replaces its whole local
+      // item with this response — silently dropping an already-visible
+      // reply thread from view until the next full page load.
+      replies: { include: { author: { select: { name: true, role: true } } }, orderBy: { createdAt: "asc" } },
+    },
   });
 
   if (data.status === "accepted" && existing.status !== "accepted" && existing.userId !== user.id) {
@@ -137,5 +146,25 @@ export async function PATCH(
     );
   }
 
-  return NextResponse.json({ feedback: updated });
+  return NextResponse.json({
+    feedback: {
+      ...updated,
+      // Flattened to the same {id, authorName, authorRole, comment,
+      // createdAt} shape components/DocumentFeedback.tsx's Feedback type
+      // (and the initial server-rendered props in app/dashboard/documents/
+      // [id]/page.tsx) already expect, rather than Prisma's nested
+      // `{ author: { name, role } }` — otherwise a reply thread on an item
+      // whose text just got edited would render with no author name/role
+      // until the next full page load.
+      replies: updated.replies.map((r) => ({
+        id: r.id,
+        authorId: r.authorId,
+        authorName: r.author.name,
+        authorRole: r.author.role,
+        comment: r.comment,
+        editedAt: r.editedAt,
+        createdAt: r.createdAt,
+      })),
+    },
+  });
 }

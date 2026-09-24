@@ -159,6 +159,7 @@ export default function PdfHighlightViewer({
   readOnly = false,
   focusRequest,
   collapsible = false,
+  embedded = false,
 }: {
   documentId: string;
   version?: number;
@@ -184,6 +185,11 @@ export default function PdfHighlightViewer({
   // components/ReviewHighlightsViewer.tsx's read-only view stays exactly
   // as before.
   collapsible?: boolean;
+  // Drops this panel's own card chrome (border/shadow/margin) outside
+  // fullscreen — see components/HighlightCommentPanel.tsx's identical prop
+  // for why (nested inside another already-bordered card via
+  // components/ReviewHighlightsViewer.tsx). Off by default.
+  embedded?: boolean;
 }) {
   const [items, setItems] = useState<PdfPanelItem[]>(initialItems);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -701,6 +707,8 @@ export default function PdfHighlightViewer({
       className={
         fullscreen
           ? "h-screen overflow-y-auto bg-white p-4"
+          : embedded
+          ? ""
           : "mb-6 rounded-ff border border-ff-border bg-white p-4 shadow-ff"
       }
     >

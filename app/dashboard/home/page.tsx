@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import AnnouncementTicker from "@/components/AnnouncementTicker";
 import CategoryIcon from "@/components/CategoryIcon";
 import LiveNewCategoryBadge from "@/components/LiveNewCategoryBadge";
@@ -116,6 +117,7 @@ export default async function HomePage() {
           )}
         </NewDocumentsProvider>
         </div>
+        <Footer />
       </main>
     </div>
   );

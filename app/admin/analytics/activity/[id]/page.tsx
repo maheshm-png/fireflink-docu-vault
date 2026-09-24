@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { LocalDateTime } from "@/components/LocalDateTime";
 
 // Per-document drill-down for the Analytics page's Most Viewed/Most
@@ -90,6 +91,7 @@ export default async function DocumentActivityPage({
         </div>
         </div>
         </div>
+        <Footer />
       </main>
     </div>
   );
