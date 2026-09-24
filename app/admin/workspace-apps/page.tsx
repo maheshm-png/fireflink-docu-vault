@@ -22,7 +22,7 @@ export default async function WorkspaceAppsPage() {
         <div className="max-w-3xl">
         <h1 className="mb-1 flex items-center gap-1.5 text-2xl font-bold tracking-tight text-ff-text">
           Workspace Apps
-          <InfoTooltip text="Controls the tiles on the FireFlink Workspace launcher (the page everyone lands on before signing in to Docu Vault). Leave the link blank to show a tile as Coming Soon instead." />
+          <InfoTooltip text="Controls the tiles on the FireFlink Workspace launcher (the public /workspace page). Leave the link blank to show a tile as Coming Soon instead." />
         </h1>
         <p className="mb-6 text-sm text-ff-textMuted">
           What shows up on the FireFlink Workspace launcher, and in what order.
