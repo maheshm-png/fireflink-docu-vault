@@ -17,24 +17,10 @@
 # match MINIO_BUCKET (default fireflink-docs), and no app route may start
 # with that name. reverse_proxy forwards the original Host header and path
 # untouched, which is what keeps MinIO's signature check valid.
-#
-# Supabase Auth shares the domain too: the browser signs in by calling
-# https://<APP_DOMAIN>/auth/v1/... directly (supabase-js builds its URLs from
-# NEXT_PUBLIC_SUPABASE_URL), so with NEXT_PUBLIC_SUPABASE_URL=https://<APP_DOMAIN>
-# those paths must reach Supabase's Kong gateway, not the app (which 404s
-# them). Only /auth/v1/* is exposed; Studio, REST, realtime and the rest of
-# Kong stay unreachable from outside. Needs this container on the
-# supabase_default network (see docker-compose.yml) and no app route may
-# start with /auth/v1.
 {$APP_DOMAIN} {
 	@storage path /fireflink-docs/*
 	handle @storage {
 		reverse_proxy minio:9000
-	}
-
-	@supabaseAuth path /auth/v1/*
-	handle @supabaseAuth {
-		reverse_proxy kong:8000
 	}
 
 	handle {
