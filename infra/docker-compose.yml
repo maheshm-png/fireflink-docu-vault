@@ -32,6 +32,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    # supabase_default: lets Caddy reach Supabase's Kong gateway (see the
+    # /auth/v1 route in Caddyfile). `default` listed too, same reason as on
+    # the app service below.
+    networks:
+      - default
+      - supabase_default
     depends_on:
       - app
       - minio
