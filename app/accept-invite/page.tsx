@@ -19,48 +19,49 @@ const supabase = createBrowserClient(
 // sends anyone signed in with a must_change_password flag, which includes
 // users an admin gave a password to directly: they sign in normally, then
 // land here to replace it with their own.
+const EXPIRED_MESSAGE = "This invite link has expired or was already used. Ask an admin to send a new invite.";
+
 export default function AcceptInvitePage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "saving" | "done">("idle");
-  // False only while an invite link's tokens are being turned into a session.
-  const [ready, setReady] = useState(true);
+  // Whether this visit actually has a session to set a password on. The form
+  // is only shown for "valid": an expired/used link used to show an error
+  // popup and then, once dismissed, the same password form anyway, which
+  // could never work.
+  const [linkState, setLinkState] = useState<"checking" | "valid" | "invalid">("checking");
 
   // Turns an invite link into a session. The emailed link carries a one-time
   // token_hash in the query (see app/api/admin/users), exchanged here via
   // verifyOtp. The URL-hash branch below covers links Supabase built itself
   // (implicit flow), which this PKCE browser client would otherwise ignore.
-  // With neither (someone already signed in and sent here by middleware.ts)
-  // there is nothing to do.
+  // With neither, an existing session (someone already signed in and sent
+  // here by middleware.ts) counts as valid; no session at all means there is
+  // nothing to set a password on.
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const tokenHash = query.get("token_hash");
+    const done = (ok: boolean) => {
+      // Tokens shouldn't linger in the address bar or browser history.
+      window.history.replaceState(null, "", window.location.pathname);
+      setLinkState(ok ? "valid" : "invalid");
+    };
+    const tokenHash = new URLSearchParams(window.location.search).get("token_hash");
     if (tokenHash) {
-      setReady(false);
-      supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ error }) => {
-        if (error) setError("This invite link has expired or was already used. Ask an admin to send a new invite.");
-        window.history.replaceState(null, "", window.location.pathname);
-        setReady(true);
-      });
+      supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ error }) => done(!error));
       return;
     }
     const params = new URLSearchParams(window.location.hash.slice(1));
-    const accessToken = params.get("access_token");
-    const refreshToken = params.get("refresh_token");
-    const linkError = params.get("error_description");
-    if (linkError) {
-      setError(`${linkError.replace(/\+/g, " ")}. Ask an admin to send a new invite.`);
+    if (params.get("error") || params.get("error_description")) {
+      done(false);
       return;
     }
-    if (!accessToken || !refreshToken) return;
-    setReady(false);
-    supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }).then(({ error }) => {
-      if (error) setError(`${error.message}. Ask an admin to send a new invite.`);
-      // Tokens shouldn't linger in the address bar or browser history.
-      window.history.replaceState(null, "", window.location.pathname);
-      setReady(true);
-    });
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) {
+      supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }).then(({ error }) => done(!error));
+      return;
+    }
+    supabase.auth.getSession().then(({ data }) => setLinkState(data.session ? "valid" : "invalid"));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -108,7 +109,24 @@ export default function AcceptInvitePage() {
         <h1 className="mb-2 text-center text-xl font-bold text-ff-text">Welcome to Docu Vault</h1>
         <p className="mb-6 text-center text-sm text-ff-textMuted">Set a password to finish setting up your account.</p>
 
-        {status === "done" ? (
+        {linkState === "checking" ? (
+          <div className="flex justify-center py-6">
+            <BrandedLoader size={28} label="Checking your invite..." />
+          </div>
+        ) : linkState === "invalid" ? (
+          <div className="space-y-4">
+            <p className="rounded-ff border border-ff-danger/30 bg-ff-danger/10 p-3 text-center text-sm text-ff-danger">
+              {EXPIRED_MESSAGE}
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.assign("/login")}
+              className="flex w-full items-center justify-center rounded-full bg-ff-accent-gradient py-2.5 text-sm font-medium text-white shadow-ff-md transition-all hover:shadow-ff-lg hover:brightness-105"
+            >
+              Go to Sign In
+            </button>
+          </div>
+        ) : status === "done" ? (
           <p className="rounded-ff border border-ff-success/30 bg-ff-success/10 p-3 text-center text-sm text-ff-success">
             Password set, taking you to your dashboard.
           </p>
@@ -147,7 +165,7 @@ export default function AcceptInvitePage() {
 
             <button
               type="submit"
-              disabled={status === "saving" || !ready}
+              disabled={status === "saving"}
               className="flex w-full items-center justify-center rounded-full bg-ff-accent-gradient py-2.5 text-sm font-medium text-white shadow-ff-md transition-all hover:shadow-ff-lg hover:brightness-105 disabled:opacity-60"
             >
               {status === "saving" ? <BrandedLoader size={18} variant="white" label="Saving..." /> : "Set Password & Continue"}
