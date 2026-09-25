@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 // itself, so its own browser tab should read as the hub, not the one app
 // that happens to also live in this same codebase.
 export const metadata: Metadata = {
-  title: "FireFlink Workspace",
+  title: "Presales Team Assets",
 };
 
 // No cookies/headers read anywhere on this page (it's public, pre-login) —
@@ -34,9 +34,9 @@ const TILE_THEMES = [
   { gradient: "bg-ff-danger-gradient", text: "text-ff-danger", dot: "bg-ff-danger" },
 ];
 
-// Public, unauthenticated landing page — the FireFlink Workspace hub, one
-// level above any single app's own sign-in (app/login/page.tsx is Docu
-// Vault's, reached as one tile here rather than being the site's own root).
+// Public, unauthenticated page at /workspace — the Presales Team Assets hub,
+// one level above any single app's own sign-in (app/login/page.tsx is Docu
+// Vault's; the site root redirects there, not here).
 // The app list itself is superadmin-managed data (app/admin/workspace-apps,
 // lib/rbac.ts's manageWorkspaceApps permission), not hardcoded here — every
 // live app is a separate deployment on its own host, so links always open
@@ -69,9 +69,9 @@ export default async function WorkspaceHomePage() {
           <div className="mb-6 flex items-center justify-between">
             <h2 className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide text-ff-textMuted">
               <LayoutGrid className="h-4 w-4" aria-hidden />
-              Apps
+              Assets
             </h2>
-            <span className="text-xs text-ff-textMuted">{apps.length} apps</span>
+            <span className="text-xs text-ff-textMuted">{apps.length} {apps.length === 1 ? "asset" : "assets"}</span>
           </div>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {apps.map((app, i) => (
