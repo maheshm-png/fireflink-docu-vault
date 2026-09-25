@@ -17,17 +17,6 @@ const supabaseAdmin = createClient(
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-// The public origin this request came in on (Caddy sets X-Forwarded-*), so an
-// invite link points at wherever the admin is actually using the app even if
-// NEXT_PUBLIC_APP_URL was baked into the build wrong. Only a signed-in
-// superadmin can reach the code that uses this.
-function requestOrigin(req: NextRequest) {
-  const host = req.headers.get("x-forwarded-host")?.split(",")[0].trim();
-  if (!host) return APP_URL;
-  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim() || "https";
-  return `${proto}://${host}`;
-}
-
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -104,10 +93,7 @@ export async function POST(req: NextRequest) {
     // yourself" escape hatch applies to bringing someone back, not just a
     // first-time add.
     if (password) {
-      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
-        password,
-        app_metadata: { must_change_password: true },
-      });
+      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(existing.id, { password });
       if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
     }
     const reactivated = await prisma.user.update({
@@ -130,42 +116,18 @@ export async function POST(req: NextRequest) {
   let actionLink: string | null = null;
   let invitedUserId: string;
   if (password) {
-    // must_change_password (app_metadata, so only this service-role client can
-    // set or clear it) makes middleware.ts hold the user on /accept-invite
-    // until they replace this admin-chosen password with their own.
-    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      app_metadata: { must_change_password: true },
-    });
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     invitedUserId = created.user.id;
   } else {
     const { data: generated, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "invite",
       email,
+      options: { redirectTo: `${APP_URL}/accept-invite` },
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     invitedUserId = generated.user.id;
-    // Deliberately not generated.properties.action_link: that URL is built by
-    // Supabase from its own API_EXTERNAL_URL / SITE_URL settings (a
-    // self-hosted stack ships with localhost defaults) and only honors our
-    // redirect if it's in its allow-list. Sending the one-time token straight
-    // to /accept-invite, which exchanges it via verifyOtp, depends on neither.
-    actionLink = `${requestOrigin(req)}/accept-invite?token_hash=${encodeURIComponent(
-      generated.properties.hashed_token
-    )}&type=invite`;
-    // The invite link signs them in with no password set yet, so without this
-    // flag they could skip /accept-invite and browse straight to the app.
-    const { error: flagError } = await supabaseAdmin.auth.admin.updateUserById(invitedUserId, {
-      app_metadata: { must_change_password: true },
-    });
-    if (flagError) {
-      // Don't leave an unflagged, unrecorded auth user behind for a retry to trip over.
-      await supabaseAdmin.auth.admin.deleteUser(invitedUserId);
-      return NextResponse.json({ error: flagError.message }, { status: 500 });
-    }
+    actionLink = generated.properties.action_link;
   }
 
   const newUser = await prisma.user.create({

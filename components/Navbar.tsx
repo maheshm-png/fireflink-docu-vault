@@ -179,7 +179,7 @@ export default function Navbar({
     ...(role === "superadmin" ? [{ href: "/admin/users", label: "Manage Users", icon: Users }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/designations", label: "Designations", icon: IdCard }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/teams", label: "Teams", icon: UsersRound }] : []),
-    ...(role === "superadmin" ? [{ href: "/admin/workspace-apps", label: "Presales Team Assets", icon: LayoutGrid }] : []),
+    ...(role === "superadmin" ? [{ href: "/admin/workspace-apps", label: "Workspace Apps", icon: LayoutGrid }] : []),
   ];
 
   return (

@@ -5,7 +5,7 @@ import { WORKSPACE_ICON_KEYS } from "@/lib/workspaceIcons";
 import { prisma } from "@/lib/prisma";
 
 // GET /api/admin/workspace-apps — superadmin only, for the manager UI
-// itself (app/admin/workspace-apps). The public launcher (app/workspace/page.tsx)
+// itself (app/admin/workspace-apps). The public launcher (app/page.tsx)
 // reads this table directly via Prisma at render time instead, since it's
 // unauthenticated and has no reason to go through an API route.
 export async function GET() {

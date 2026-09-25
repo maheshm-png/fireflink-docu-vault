@@ -126,7 +126,6 @@ export default function InviteUserForm() {
         <div className="mb-3 flex items-start justify-between gap-3 rounded-ff border border-ff-success/30 bg-ff-success/10 p-3">
           <div className="min-w-0 text-sm">
             <p className="font-semibold text-ff-text">Account created. Copy these and send them to the user:</p>
-            <p className="text-xs text-ff-textMuted">They will be asked to choose their own password the first time they sign in.</p>
             <p className="mt-1 break-all text-ff-textMuted">
               Email: <span className="font-mono text-ff-text">{createdCredentials.email}</span>
             </p>

@@ -98,7 +98,6 @@ export default function ResetPasswordButton({ userId, userName }: { userId: stri
               {done ? (
                 <div className="rounded-ff border border-ff-success/30 bg-ff-success/10 p-3">
                   <p className="text-sm font-semibold text-ff-text">Password reset. Copy it and send it to them:</p>
-                  <p className="text-xs text-ff-textMuted">They will be asked to choose their own password the next time they sign in.</p>
                   <p className="mt-1 break-all text-sm text-ff-textMuted">
                     Password: <span className="font-mono text-ff-text">{password}</span>
                   </p>

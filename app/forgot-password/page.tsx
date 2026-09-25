@@ -38,7 +38,7 @@ export default function ForgotPasswordPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json();
     setLoading(false);
     if (!res.ok) {
       setError(data.error ?? "Something went wrong, please try again.");
@@ -73,7 +73,7 @@ export default function ForgotPasswordPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, code, password }),
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json();
     setLoading(false);
     if (!res.ok) {
       setError(data.error ?? "Something went wrong.");

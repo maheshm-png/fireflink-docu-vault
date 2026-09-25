@@ -73,7 +73,7 @@ export const PERMISSIONS = {
   // The admin-managed team option list (app/admin/teams) — same tier and
   // same reasoning as manageDesignations above.
   manageTeams: ["superadmin"],
-  // The FireFlink Workspace launcher's app list (app/workspace/page.tsx, the public
+  // The FireFlink Workspace launcher's app list (app/page.tsx, the public
   // pre-login hub) — superadmin-only per explicit request, not extended to
   // manager like most other admin surfaces: this isn't a document-management
   // concern at all, it's org-wide branding/navigation that sits outside

@@ -53,23 +53,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         { status: 400 }
       );
     }
-    // An admin knows this password, so the user must pick their own at next
-    // sign-in (enforced by middleware.ts, cleared by /api/auth/set-password).
-    // Throws (not returns an error) when target.id isn't a valid UUID, i.e. a
-    // User row that doesn't match a Supabase Auth account.
-    try {
-      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(target.id, {
-        password,
-        app_metadata: { must_change_password: true },
-      });
-      if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
-    } catch (e) {
-      console.error(`reset password: could not update auth user for ${target.email} (User.id=${target.id})`, e);
-      return NextResponse.json(
-        { error: "This user's account id doesn't match a Supabase Auth user, so the password can't be changed. Check the User row's id." },
-        { status: 500 }
-      );
-    }
+    const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(target.id, { password });
+    if (pwError) return NextResponse.json({ error: pwError.message }, { status: 500 });
     await logAudit({ userId: user.id, action: "reset_password", documentId: undefined });
     passwordWasReset = true;
   }

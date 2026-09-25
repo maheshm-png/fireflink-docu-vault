@@ -82,9 +82,9 @@ export default function WorkspaceHeader({ appCount }: { appCount: number }) {
           <div className="relative z-10 mx-auto flex max-w-6xl items-center justify-center gap-3">
             <Logo variant="white" width={120} height={29} priority />
             <span className="h-5 w-px shrink-0 bg-white/25" aria-hidden />
-            <span className="shrink-0 text-base font-bold uppercase tracking-tight">Presales Team Assets</span>
+            <span className="shrink-0 text-base font-bold uppercase tracking-tight">Workspace</span>
             <span className="hidden truncate text-sm text-white/60 sm:inline">
-              Everything our team contributes, in one place.
+              Sign in to any FireFlink app from one place.
             </span>
           </div>
         ) : (
@@ -95,14 +95,14 @@ export default function WorkspaceHeader({ appCount }: { appCount: number }) {
                 separates a hero from a plain colored banner. */}
             <span className="mt-8 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white/90 backdrop-blur-sm">
               <Sparkles className="h-3.5 w-3.5 text-white/70" aria-hidden />
-              {appCount} {appCount === 1 ? "asset" : "assets"}, one place
+              {appCount} {appCount === 1 ? "app" : "apps"}, one workspace
             </span>
 
             <h1 className="mt-5 text-4xl font-extrabold tracking-tight drop-shadow-[0_2px_20px_rgba(0,0,0,0.2)] sm:text-5xl">
-              <span className="uppercase">Presales Team Assets</span>
+              FireFlink <span className="uppercase">Workspace</span>
             </h1>
             <p className="mx-auto mt-4 max-w-md text-base text-white/70">
-              Everything our team contributes, in one place.
+              Sign in to any FireFlink app from one place.
             </p>
           </div>
         )}

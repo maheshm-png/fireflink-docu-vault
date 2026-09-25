@@ -1,10 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // The site root never renders anything: it goes straight to Docu Vault's sign-in.
-  // Done here (a real 307) because app/loading.tsx makes a page-level redirect() a 200.
-  async redirects() {
-    return [{ source: "/", destination: "/login", permanent: false }];
-  },
   experimental: {
     serverActions: { bodySizeLimit: "500mb" }, // allow large PPT/video uploads
     // Next.js 14's client-side Router Cache otherwise reuses a dynamic
