@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { withoutDeletedDocuments } from "@/lib/notifications";
 
 // GET /api/notifications/new-documents — this user's unread "published"
 // notifications, joined out to the documents' categories. Polled by
@@ -14,11 +15,13 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const unread = await prisma.notification.findMany({
-    where: { userId: user.id, type: "published", read: false },
-    orderBy: { createdAt: "desc" },
-    select: { documentId: true, documentTitle: true },
-  });
+  const unread = await withoutDeletedDocuments(
+    await prisma.notification.findMany({
+      where: { userId: user.id, type: "published", read: false },
+      orderBy: { createdAt: "desc" },
+      select: { documentId: true, documentTitle: true },
+    })
+  );
   const documentIds = unread.map((n) => n.documentId).filter((id): id is string => id !== null);
 
   const docs = documentIds.length

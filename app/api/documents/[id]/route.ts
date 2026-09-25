@@ -229,9 +229,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     );
   }
 
-  if (document.status === "published") {
-    await removeFromIndex(document.id);
-  }
+  // Unconditional: a document back in re-review (status pending_review or
+  // rejected) still has its prior approved version in the index, so gating
+  // this on status "published" left deleted documents listed. Removing an
+  // id that was never indexed is a harmless no-op.
+  await removeFromIndex(document.id);
 
   await prisma.document.update({
     where: { id: document.id },

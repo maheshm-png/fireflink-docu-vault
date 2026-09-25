@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
-import { search } from "@/lib/search";
+import { search, publishedCountsByCategory } from "@/lib/search";
 import { prisma } from "@/lib/prisma";
+import { withoutDeletedDocuments } from "@/lib/notifications";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import FilterBar from "@/components/FilterBar";
@@ -24,29 +25,14 @@ export default async function DashboardPage({
   if (!user) redirect("/login");
 
   // Categories for the tab strip, with a published-doc count per category
-  // so users can see volume before clicking — fetched via Prisma directly
-  // rather than the /api/categories route, since we need the groupBy too.
-  //
-  // Deliberately NOT `status: "published"` alone: a document that's already
-  // been published keeps its old approved content live and searchable
-  // (removeFromIndex is only ever called on revoke/archive — see those
-  // routes — never just for a new version going back to review), even while
-  // its status is temporarily "pending_review" (a new version was uploaded
-  // and is awaiting its own decision) or "rejected" (that new version got
-  // turned down, but the document's still-good prior version stays up).
-  // Counting only literal status "published" undercounts exactly those two
-  // cases — currentVersionId being set is what actually determines whether
-  // there's a live version to search/count, matching what the search index
-  // (used by the actual document list below) still shows.
-  const [categories, counts] = await Promise.all([
+  // so users can see volume before clicking. Counted from the search index
+  // (see publishedCountsByCategory in lib/search.ts), the same source the
+  // document list below reads from, so a tab's count always equals what it
+  // lists.
+  const [categories, countByCategoryName] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { deletedAt: null, currentVersionId: { not: null }, status: { notIn: ["archived", "revoked"] } },
-      _count: { _all: true },
-    }),
+    publishedCountsByCategory(),
   ]);
-  const countByCategory = new Map(counts.map((c) => [c.categoryId, c._count._all]));
 
   // Seeds NewDocumentsProvider below — this user's own unread "published"
   // notifications (the same per-user, dismissible record the bell already
@@ -73,10 +59,13 @@ export default async function DashboardPage({
       orderBy: { createdAt: "desc" },
       select: { documentId: true, documentTitle: true },
     }),
-    search(searchParams.q ?? "", filters),
+    // High limit: the default 25 cut off categories with more documents than
+    // that (a tab reading 31 listed only 25).
+    search(searchParams.q ?? "", filters, 1000),
   ]);
-  const newDocIds = unreadPublishedNotifications.map((n) => n.documentId).filter((id): id is string => id !== null);
-  const recentDocs = unreadPublishedNotifications
+  const liveUnreadPublished = await withoutDeletedDocuments(unreadPublishedNotifications);
+  const newDocIds = liveUnreadPublished.map((n) => n.documentId).filter((id): id is string => id !== null);
+  const recentDocs = liveUnreadPublished
     .slice(0, 5)
     .filter((n): n is { documentId: string; documentTitle: string | null } => n.documentId !== null)
     .map((n) => ({ id: n.documentId, title: n.documentTitle ?? "Untitled document" }));
@@ -86,7 +75,7 @@ export default async function DashboardPage({
   const categoryTabs = categories.map((c) => ({
     id: c.id,
     name: c.name,
-    count: countByCategory.get(c.id) ?? 0,
+    count: countByCategoryName.get(c.name) ?? 0,
   }));
 
   const view = searchParams.view === "grid" ? "grid" : "list";

@@ -4,6 +4,8 @@ import { Plus } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { withoutDeletedDocuments } from "@/lib/notifications";
+import { publishedCountsByCategory } from "@/lib/search";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import AnnouncementTicker from "@/components/AnnouncementTicker";
@@ -15,18 +17,13 @@ export default async function HomePage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  // Same category + live-doc-count query as the Published Documents page
-  // (app/dashboard/page.tsx — see its own comment for why this isn't just
-  // `status: "published"`) — each tile below links straight into that page
+  // Same category + count source as the Published Documents page
+  // (app/dashboard/page.tsx): each tile below links straight into that page
   // pre-filtered to the category it represents, so the count shown here is
   // exactly what clicking through will show.
-  const [categories, counts, unreadPublishedNotifications] = await Promise.all([
+  const [categories, countByCategoryName, unreadPublishedNotifications] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { deletedAt: null, currentVersionId: { not: null }, status: { notIn: ["archived", "revoked"] } },
-      _count: { _all: true },
-    }),
+    publishedCountsByCategory(),
     // Seeds NewDocumentsProvider below, same as app/dashboard/page.tsx — this
     // user's own unread "published" notifications, used two ways: the
     // ticker's "New: ..." entries, and which category tiles get their own
@@ -39,9 +36,9 @@ export default async function HomePage() {
       select: { documentId: true, documentTitle: true },
     }),
   ]);
-  const countByCategory = new Map(counts.map((c) => [c.categoryId, c._count._all]));
-  const newDocIds = unreadPublishedNotifications.map((n) => n.documentId).filter((id): id is string => id !== null);
-  const recentDocs = unreadPublishedNotifications
+  const liveUnreadPublished = await withoutDeletedDocuments(unreadPublishedNotifications);
+  const newDocIds = liveUnreadPublished.map((n) => n.documentId).filter((id): id is string => id !== null);
+  const recentDocs = liveUnreadPublished
     .slice(0, 5)
     .filter((n): n is { documentId: string; documentTitle: string | null } => n.documentId !== null)
     .map((n) => ({ id: n.documentId, title: n.documentTitle ?? "Untitled document" }));
@@ -95,7 +92,7 @@ export default async function HomePage() {
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {categories.map((c) => {
-                const count = countByCategory.get(c.id) ?? 0;
+                const count = countByCategoryName.get(c.name) ?? 0;
                 return (
                   <Link
                     key={c.id}

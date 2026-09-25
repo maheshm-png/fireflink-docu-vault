@@ -14,7 +14,7 @@ export default async function TeamsPage() {
 
   const teams = await prisma.team.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { users: true } } },
+    include: { _count: { select: { users: { where: { isActive: true } } } } },
   });
 
   return (

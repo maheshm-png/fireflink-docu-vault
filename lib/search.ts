@@ -89,6 +89,29 @@ export async function search(query: string, filters: string[] = [], limit = 25) 
 }
 
 /**
+ * Published-document count per category NAME, straight from the same index
+ * (and the same `status = "published"` filter) the Published Documents list
+ * reads from — so a Home tile or category tab count always matches what
+ * clicking through actually lists. Counting from Prisma instead drifted:
+ * legacy documents with a stale, never-approved currentVersionId got
+ * counted there but were never in the index. Empty map on an outage, same
+ * best-effort fallback as search() (the list would be empty then too).
+ */
+export async function publishedCountsByCategory(): Promise<Map<string, number>> {
+  try {
+    const res = await client.index(INDEX).search("", {
+      filter: 'status = "published"',
+      facets: ["categoryName"],
+      limit: 0,
+    });
+    return new Map(Object.entries(res.facetDistribution?.categoryName ?? {}));
+  } catch (err) {
+    console.error("Meilisearch category counts failed (index may be unreachable):", err);
+    return new Map();
+  }
+}
+
+/**
  * Same as search(), but for callers (the AI assistant) that need to know
  * whether a hit is an actual topical match versus Meilisearch's fallback
  * behavior of still returning its best-effort guess even when nothing

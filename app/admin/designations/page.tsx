@@ -14,7 +14,7 @@ export default async function DesignationsPage() {
 
   const designations = await prisma.designation.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { users: true } } },
+    include: { _count: { select: { users: { where: { isActive: true } } } } },
   });
 
   return (
