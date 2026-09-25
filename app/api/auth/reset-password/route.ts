@@ -53,12 +53,32 @@ export async function POST(req: NextRequest) {
 
   // The person chose this password themselves via an emailed code, so any
   // must_change_password flag from an earlier admin-set one no longer applies.
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
-    password,
-    app_metadata: { must_change_password: false },
-  });
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // updateUserById also THROWS (rather than returning an error) when user.id
+  // isn't a valid UUID, so it's wrapped, and nothing here may escape as
+  // Next's HTML 500 page.
+  try {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+      password,
+      app_metadata: { must_change_password: false },
+    });
+    if (error) {
+      // A 4xx from Supabase is about the password itself (too weak, same as
+      // the old one) and worth showing. Anything else is infrastructure, e.g.
+      // an unreachable or misrouted Supabase URL, whose raw message ("Unexpected
+      // token '<'...", from an HTML page) means nothing to the user.
+      console.error(`reset-password: Supabase rejected the update for ${email}`, error);
+      const userFacing = typeof error.status === "number" && error.status >= 400 && error.status < 500;
+      return NextResponse.json(
+        { error: userFacing ? error.message : "We couldn't reset this password. Please try again, or contact docuvault@fireflink.com." },
+        { status: 500 }
+      );
+    }
+  } catch (e) {
+    console.error(`reset-password: could not update auth user for ${email} (User.id=${user.id})`, e);
+    return NextResponse.json(
+      { error: "We couldn't reset this password. Please contact docuvault@fireflink.com." },
+      { status: 500 }
+    );
   }
 
   await prisma.passwordResetOtp.update({ where: { id: otp.id }, data: { used: true } });
