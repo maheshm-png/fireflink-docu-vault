@@ -158,8 +158,8 @@ export default function AnnouncementManager({ initialAnnouncements }: { initialA
               </div>
             ) : (
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className={`break-words text-sm ${a.isActive ? "text-ff-text" : "text-ff-textMuted line-through"}`}>
+                <div className="min-w-0 flex-1">
+                  <p className={`whitespace-pre-line break-words text-sm [overflow-wrap:anywhere] ${a.isActive ? "text-ff-text" : "text-ff-textMuted line-through"}`}>
                     {a.message}
                   </p>
                   <p className="mt-1 text-xs text-ff-textMuted">

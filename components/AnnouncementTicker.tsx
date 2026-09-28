@@ -21,7 +21,7 @@ const ROTATE_INTERVAL_MS = 6_000;
  * app/dashboard/home/page.tsx) — that's where "new document" entries come
  * from now, not a prop, so they clear on their own once opened.
  *
- * A single-message slider (crossfade + dots + arrows) rather than a
+ * A single-message slider (fade + dots + arrows) rather than a
  * continuously scrolling marquee — one message at a time reads as a normal
  * "what's new" bar instead of a ticker-tape effect, and stays legible
  * without anyone needing to chase text sliding past. */
@@ -80,6 +80,7 @@ export default function AnnouncementTicker() {
   }, [items.length, paused]);
 
   if (items.length === 0) return null;
+  const active = items[index] ?? items[0];
 
   return (
     <div
@@ -91,21 +92,16 @@ export default function AnnouncementTicker() {
         <Megaphone className="h-3.5 w-3.5" aria-hidden />
       </span>
 
-      <div className="relative h-7 min-w-0 flex-1 overflow-hidden">
-        <div
-          className="flex h-full transition-transform duration-500 ease-in-out motion-reduce:transition-none"
-          style={{ transform: `translateX(-${index * 100}%)` }}
-        >
-          {items.map((item, i) => (
-            <div
-              key={`${item.kind}-${item.id}`}
-              aria-hidden={i !== index}
-              className="flex h-full w-full shrink-0 items-center"
-            >
-              <TickerEntry item={item} />
-            </div>
-          ))}
-        </div>
+      {/* Only the active message is rendered, keyed so it fades in on each
+          change, and the bar grows to fit it. The old fixed-height
+          translateX strip forced every message onto one clipped line, so a
+          long announcement was cut off and its pill overflowed the strip. */}
+      <div className="min-w-0 flex-1">
+        {active && (
+          <div key={`${active.kind}-${active.id}`} className="animate-fade-in motion-reduce:animate-none">
+            <TickerEntry item={active} />
+          </div>
+        )}
       </div>
 
       {items.length > 1 && (
@@ -151,7 +147,7 @@ export default function AnnouncementTicker() {
 
 function AuthorBadge({ name }: { name: string }) {
   return (
-    <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/70 py-0.5 pl-0.5 pr-2 text-xs font-medium text-ff-accent">
+    <span className="mt-0.5 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-ff-lavender/60 py-0.5 pl-0.5 pr-2 text-xs font-medium text-ff-accent">
       <span className="flex h-4 w-4 items-center justify-center rounded-full bg-ff-accent text-[9px] font-semibold uppercase text-white">
         {name.charAt(0)}
       </span>
@@ -165,19 +161,19 @@ function TickerEntry({ item }: { item: TickerItem }) {
     return (
       <Link
         href={`/dashboard/documents/${item.id}`}
-        className="group flex max-w-full min-w-0 items-center gap-2 rounded-full border border-ff-accent/20 bg-ff-accent/[0.06] py-1 pl-1 pr-3 text-sm text-ff-text transition-colors hover:bg-ff-accent/10"
+        className="group inline-flex max-w-full items-start gap-2 rounded-ff border border-ff-accent/20 bg-ff-accent/[0.06] py-1 pl-1 pr-3 text-sm text-ff-text transition-colors hover:bg-ff-accent/10"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ff-accent/15 text-ff-accent">
           <Sparkles className="h-3 w-3" aria-hidden />
         </span>
-        <span className="truncate group-hover:underline">{item.text}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere] group-hover:underline">{item.text}</span>
       </Link>
     );
   }
   return (
-    <span className="flex max-w-full min-w-0 items-center gap-2 rounded-full border border-ff-border bg-white py-1 pl-3 pr-1 text-sm text-ff-text shadow-sm">
-      <span className="truncate">{item.text}</span>
+    <div className="inline-flex max-w-full items-start gap-2 rounded-ff border border-ff-border bg-white py-1 pl-3 pr-1 text-sm text-ff-text shadow-sm">
+      <span className="min-w-0 flex-1 whitespace-pre-line break-words py-0.5 [overflow-wrap:anywhere]">{item.text}</span>
       <AuthorBadge name={item.author} />
-    </span>
+    </div>
   );
 }
