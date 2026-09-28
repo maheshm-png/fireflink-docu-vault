@@ -13,6 +13,15 @@ export type SavedFilterChip = { id: string; name: string; params: [string, strin
 
 type Pairs = [string, string][];
 
+// Shown straight in the toolbar and applied on pick, no panel needed; the
+// panel has these too, alongside everything else.
+const QUICK_FILTERS = [
+  { key: "docType", label: "Type" },
+  { key: "uploader", label: "Uploaded by" },
+  { key: "tags", label: "Tags" },
+  { key: "owner", label: "Owner" },
+];
+
 const sortPairs = (pairs: Pairs) =>
   [...pairs].sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
 const samePairs = (a: Pairs, b: Pairs) => JSON.stringify(sortPairs(a)) === JSON.stringify(sortPairs(b));
@@ -114,6 +123,13 @@ export default function DocumentFilters({
     router.refresh();
   }
 
+  function quickOptions(key: string) {
+    if (key === "docType") return options.docTypes.map((t) => ({ value: t, label: DOC_TYPE_LABEL[t] ?? t }));
+    if (key === "uploader") return options.uploaders.map((u) => ({ value: u, label: u }));
+    if (key === "owner") return options.owners.map((u) => ({ value: u, label: u }));
+    return options.tags.map((t) => ({ value: t, label: t }));
+  }
+
   const inputClass =
     "w-full rounded-ff border border-ff-border bg-white px-2.5 py-1.5 text-sm text-ff-text focus:border-ff-accent focus:outline-none";
 
@@ -136,6 +152,23 @@ export default function DocumentFilters({
             <span className="rounded-full bg-ff-accent-gradient px-1.5 text-xs font-medium text-white">{activeCount}</span>
           )}
         </button>
+
+        {QUICK_FILTERS.map(({ key, label }) => {
+          const opts = quickOptions(key);
+          if (opts.length === 0) return null;
+          return (
+            <div key={key} className="w-44">
+              <MultiSelect
+                label={label}
+                options={opts}
+                selected={currentPairs.filter(([k]) => k === key).map(([, v]) => v)}
+                onChange={(values) =>
+                  navigate([...currentPairs.filter(([k]) => k !== key), ...values.map((v) => [key, v] as [string, string])])
+                }
+              />
+            </div>
+          );
+        })}
 
         {saved.map((s) => {
           const isActive = currentPairs.length > 0 && samePairs(s.params, currentPairs);
@@ -401,10 +434,12 @@ function DateRange({
 }
 
 function MultiSelect({
+  label,
   options,
   selected,
   onChange,
 }: {
+  label?: string;
   options: { value: string; label: string }[];
   selected: string[];
   onChange: (values: string[]) => void;
@@ -423,8 +458,9 @@ function MultiSelect({
   }, [open]);
 
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
-  const summary =
+  const picked =
     selected.length === 0 ? "Any" : selected.length <= 2 ? selected.map(labelOf).join(", ") : `${selected.length} selected`;
+  const summary = label ? `${label}: ${picked}` : picked;
   const visible = query ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase())) : options;
 
   if (options.length === 0) {
@@ -436,13 +472,16 @@ function MultiSelect({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-ff border border-ff-border bg-white px-2.5 py-1.5 text-left text-sm text-ff-text focus:border-ff-accent focus:outline-none"
+        title={summary}
+        className={`flex w-full items-center justify-between gap-2 rounded-ff border bg-white text-left text-sm text-ff-text focus:border-ff-accent focus:outline-none ${
+          label ? "px-3 py-2" : "px-2.5 py-1.5"
+        } ${label && selected.length > 0 ? "border-ff-accent/50" : "border-ff-border"}`}
       >
         <span className={`truncate ${selected.length === 0 ? "text-ff-textMuted" : ""}`}>{summary}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-30 mt-1 rounded-ff border border-ff-border bg-white p-1.5 shadow-ff-lg">
+        <div className="absolute left-0 z-30 mt-1 w-full min-w-[14rem] rounded-ff border border-ff-border bg-white p-1.5 shadow-ff-lg">
           {options.length > 8 && (
             <input
               value={query}
