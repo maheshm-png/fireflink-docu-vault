@@ -8,28 +8,35 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import FilterBar from "@/components/FilterBar";
 import CategoryTabs from "@/components/CategoryTabs";
-import CategoryFieldFilters, { type FilterableField } from "@/components/CategoryFieldFilters";
+import DocumentFilters from "@/components/DocumentFilters";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
 import DocumentSections from "@/components/DocumentSections";
 import AnnouncementTicker from "@/components/AnnouncementTicker";
 import { NewDocumentsProvider } from "@/components/NewDocumentsProvider";
-import type { CategoryFormField } from "@/lib/formSchema";
+import { activeFilterCount, applyFilters, buildFilterOptions, schemaForSection, type FilterableDoc, type RawParams } from "@/lib/docFilters";
+import { getSavedFilters } from "@/lib/savedFilters";
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | undefined>;
+  searchParams: RawParams;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+
+  const param = (key: string) => {
+    const v = searchParams[key];
+    return (Array.isArray(v) ? v[0] : v) ?? "";
+  };
+  const categoryId = param("category");
 
   // Categories for the tab strip, with a published-doc count per category
   // so users can see volume before clicking. Counted from the search index
   // (see publishedCountsByCategory in lib/search.ts), the same source the
   // document list below reads from, so a tab's count always equals what it
   // lists.
-  const [categories, countByCategoryName] = await Promise.all([
+  const [categories, countByCategoryId] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     publishedCountsByCategory(),
   ]);
@@ -42,18 +49,20 @@ export default async function DashboardPage({
   // polls /api/notifications/new-documents from here on, so opening a
   // document actually clears its NEW badge/ticker entry without a refresh —
   // see components/NewDocumentsProvider.tsx.
+  //
+  // Only "published" and the keyword go to Meilisearch. The category tab
+  // and every custom filter (lib/docFilters.ts) are applied below against
+  // the database: the index only knows each document's category by the
+  // name it had when it was indexed, so filtering on that dropped every
+  // document from a tab once its category was renamed. Most of what the
+  // custom filters look at (owner, metadata, created date) isn't in the
+  // index at all, and the unfiltered section is also what the filter
+  // choices are built from.
   const filters: string[] = ['status = "published"'];
-  if (searchParams.category) {
-    // CategoryTabs passes the category id, but Meilisearch only has the
-    // category's name indexed (categoryName) — resolve id -> name here.
-    const categoryName = categories.find((c) => c.id === searchParams.category)?.name;
-    if (categoryName) filters.push(`categoryName = "${categoryName}"`);
-  }
-  if (searchParams.docType) filters.push(`docType = "${searchParams.docType}"`);
-  if (searchParams.stale === "true") filters.push(`isStale = true`);
+  const section = `published:${categories.some((c) => c.id === categoryId) ? categoryId : "all"}`;
 
   // Independent of each other — neither needs the other's result.
-  const [unreadPublishedNotifications, results] = await Promise.all([
+  const [unreadPublishedNotifications, results, savedFilters] = await Promise.all([
     prisma.notification.findMany({
       where: { userId: user.id, type: "published", read: false },
       orderBy: { createdAt: "desc" },
@@ -61,7 +70,8 @@ export default async function DashboardPage({
     }),
     // High limit: the default 25 cut off categories with more documents than
     // that (a tab reading 31 listed only 25).
-    search(searchParams.q ?? "", filters, 1000),
+    search(param("q"), filters, 1000),
+    getSavedFilters(user.id, section),
   ]);
   const liveUnreadPublished = await withoutDeletedDocuments(unreadPublishedNotifications);
   const newDocIds = liveUnreadPublished.map((n) => n.documentId).filter((id): id is string => id !== null);
@@ -75,18 +85,17 @@ export default async function DashboardPage({
   const categoryTabs = categories.map((c) => ({
     id: c.id,
     name: c.name,
-    count: countByCategoryName.get(c.name) ?? 0,
+    count: countByCategoryId.get(c.id) ?? 0,
   }));
 
-  const view = searchParams.view === "grid" ? "grid" : "list";
+  const view = param("view") === "grid" ? "grid" : "list";
 
-  // Custom-field filtering + Case Studies domain grouping — both driven by
+  // Custom-field filters + Case Studies domain grouping are both driven by
   // the selected category's formSchema and the real metadata values present
-  // on the documents currently in view (not the schema's declared options),
-  // so it works the same for a dropdown field, free text, date, or number.
-  const selectedCategory = categories.find((c) => c.id === searchParams.category);
-  const schema = (selectedCategory?.formSchema as unknown as CategoryFormField[] | undefined) ?? [];
-  const filterableFieldDefs = schema.filter((f) => f.type !== "textarea");
+  // on the documents in view (not the schema's declared options), so they
+  // work the same for a dropdown field, free text, date, or number.
+  const selectedCategory = categories.find((c) => c.id === categoryId);
+  const schema = schemaForSection(categories, selectedCategory?.id ?? null);
 
   // Manager/superadmin see this for ANY document (a decision they can make);
   // a contributor only sees it on their OWN uploads (something they're
@@ -94,11 +103,10 @@ export default async function DashboardPage({
   // badge on the document detail page itself.
   const wantsPendingApproval =
     (user.role === "manager" || user.role === "superadmin" || user.role === "contributor") && rows.length > 0;
-  const wantsMetas = Boolean(selectedCategory) && rows.length > 0 && filterableFieldDefs.length > 0;
 
   // Independent of each other — both only need the row ids already in hand
   // from the search above — so they don't need to wait in sequence.
-  const [pendingApproval, metas] = await Promise.all([
+  const [pendingApproval, details] = await Promise.all([
     wantsPendingApproval
       ? prisma.document.findMany({
           // Flags rows that look "published" here (the search index still
@@ -115,10 +123,20 @@ export default async function DashboardPage({
           select: { id: true, uploadedById: true },
         })
       : Promise.resolve([]),
-    wantsMetas
+    // What the custom filters need beyond the search hit itself.
+    rows.length > 0
       ? prisma.document.findMany({
-          where: { id: { in: rows.map((r) => r.id) } },
-          select: { id: true, metadata: true },
+          where: { id: { in: rows.map((r) => r.id) }, deletedAt: null },
+          select: {
+            id: true,
+            categoryId: true,
+            category: { select: { name: true } },
+            tags: true,
+            metadata: true,
+            createdAt: true,
+            duplicateOfId: true,
+            owner: { select: { name: true } },
+          },
         })
       : Promise.resolve([]),
   ]);
@@ -131,55 +149,52 @@ export default async function DashboardPage({
     rows = rows.map((r) => ({ ...r, hasPendingApproval: pendingApprovalIds.has(r.id) }));
   }
 
-  let filterableFields: FilterableField[] = [];
+  const detailById = new Map(details.map((d) => [d.id, d]));
+  // Category from the database, not the index (see the filters comment
+  // above); also drops anything soft-deleted that's still indexed.
+  rows = rows
+    .filter((r) => {
+      const d = detailById.get(r.id);
+      return d !== undefined && (!selectedCategory || d.categoryId === selectedCategory.id);
+    })
+    .map((r) => ({ ...r, categoryName: detailById.get(r.id)!.category.name }));
+  const metaOf = (id: string) => (detailById.get(id)?.metadata as Record<string, unknown> | undefined) ?? {};
+  const filterable: FilterableDoc[] = rows.map((r) => {
+    const d = detailById.get(r.id);
+    return {
+      id: r.id,
+      title: r.title,
+      tags: d?.tags ?? [],
+      docType: r.docType,
+      categoryId: d?.categoryId ?? "",
+      categoryName: r.categoryName,
+      uploadedByName: r.uploadedByName,
+      ownerName: d?.owner.name ?? "",
+      createdAt: d?.createdAt.toISOString() ?? r.updatedAt,
+      updatedAt: r.updatedAt,
+      isStale: r.isStale,
+      isDuplicate: Boolean(d?.duplicateOfId || r.duplicateOfTitle),
+      metadata: metaOf(r.id),
+    };
+  });
+  const filterOptions = buildFilterOptions(filterable, schema, { withCategories: !selectedCategory, showStale: true });
+  const keptIds = new Set(applyFilters(filterable, searchParams, schema, { keywordInMemory: false }).map((d) => d.id));
+  rows = rows.filter((r) => keptIds.has(r.id));
+
   let domainGroups: { id: string; name: string; rows: DocRow[] }[] | null = null;
-  let activeFieldFilterCount = 0;
-
-  if (wantsMetas && selectedCategory) {
-    const metaById = new Map(metas.map((m) => [m.id, (m.metadata as Record<string, unknown>) ?? {}]));
-    const displayValue = (v: unknown) => (typeof v === "boolean" ? (v ? "Yes" : "No") : String(v ?? ""));
-
-    filterableFields = filterableFieldDefs
-      .map((f) => {
-        const values = new Set<string>();
-        for (const m of metaById.values()) {
-          const v = m[f.id];
-          if (v === undefined || v === null || v === "") continue;
-          values.add(displayValue(v));
-        }
-        return { id: f.id, label: f.label, values: [...values].sort() };
-      })
-      .filter((f) => f.values.length > 1);
-
-    const activeFieldFilters = filterableFieldDefs
-      .map((f) => ({ id: f.id, value: searchParams[`f_${f.id}`] }))
-      .filter((x): x is { id: string; value: string } => Boolean(x.value));
-    activeFieldFilterCount = activeFieldFilters.length;
-
-    if (activeFieldFilters.length > 0) {
-      rows = rows.filter((r) => {
-        const m = metaById.get(r.id) ?? {};
-        return activeFieldFilters.every(({ id, value }) => displayValue(m[id]) === value);
-      });
+  if (selectedCategory?.name === "Case Studies") {
+    const grouped = new Map<string, DocRow[]>();
+    for (const r of rows) {
+      const domain = (metaOf(r.id).domain as string)?.trim() || "Unspecified";
+      if (!grouped.has(domain)) grouped.set(domain, []);
+      grouped.get(domain)!.push(r);
     }
-
-    if (selectedCategory.name === "Case Studies") {
-      const grouped = new Map<string, DocRow[]>();
-      for (const r of rows) {
-        const m = metaById.get(r.id) ?? {};
-        const domain = (m.domain as string)?.trim() || "Unspecified";
-        if (!grouped.has(domain)) grouped.set(domain, []);
-        grouped.get(domain)!.push(r);
-      }
-      domainGroups = [...grouped.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([domain, domainRows]) => ({ id: domain, name: domain, rows: domainRows }));
-    }
+    domainGroups = [...grouped.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([domain, domainRows]) => ({ id: domain, name: domain, rows: domainRows }));
   }
 
-  const hasFilters = Boolean(
-    searchParams.q || searchParams.category || searchParams.docType || searchParams.stale || activeFieldFilterCount > 0
-  );
+  const hasFilters = Boolean(categoryId || activeFilterCount(searchParams) > 0);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
@@ -190,8 +205,16 @@ export default async function DashboardPage({
         <NewDocumentsProvider initialDocumentIds={newDocIds} initialRecentDocs={recentDocs}>
           <AnnouncementTicker />
           <CategoryTabs categories={categoryTabs} basePath="/dashboard" />
-          <FilterBar canUpload={can(user.role, "upload")} showViewToggle />
-          <CategoryFieldFilters basePath="/dashboard" fields={filterableFields} />
+          <FilterBar canUpload={can(user.role, "upload")} showViewToggle>
+            <DocumentFilters
+              key={section}
+              basePath="/dashboard"
+              section={section}
+              options={filterOptions}
+              saved={savedFilters}
+              keepKeys={["category", "view"]}
+            />
+          </FilterBar>
 
           {domainGroups ? (
             <DocumentSections groups={domainGroups} view={view} hasFilters={hasFilters} />

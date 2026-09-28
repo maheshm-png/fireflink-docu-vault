@@ -6,7 +6,10 @@ import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
-import ViewToggle from "@/components/ViewToggle";
+import FilterBar from "@/components/FilterBar";
+import DocumentFilters from "@/components/DocumentFilters";
+import { filterDocs, type RawParams } from "@/lib/docFilters";
+import { getSavedFilters } from "@/lib/savedFilters";
 
 // Org-wide, view-only listing of revoked documents — unlike the Review
 // Dashboard's "Revoked" tab (app/dashboard/pending/page.tsx), which is
@@ -21,26 +24,30 @@ import ViewToggle from "@/components/ViewToggle";
 export default async function RevokedDocumentsPage({
   searchParams,
 }: {
-  searchParams: { view?: string };
+  searchParams: RawParams & { view?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const docs = await prisma.document.findMany({
+  const section = "revoked";
+  const [docs, savedFilters] = await Promise.all([prisma.document.findMany({
     where: { status: "revoked", deletedAt: null },
     include: {
       category: true,
       uploadedBy: true,
+      owner: { select: { name: true } },
       revokedBy: true,
       currentVersion: true,
     },
     orderBy: { updatedAt: "desc" },
-  });
+  }), getSavedFilters(user.id, section)]);
+
+  const { options: filterOptions, kept } = filterDocs(docs, searchParams);
 
   const canDownload = (uploadedById: string, ownerId: string) =>
     user.role === "manager" || user.role === "superadmin" || uploadedById === user.id || ownerId === user.id;
 
-  const rows: DocRow[] = docs.map((doc) => ({
+  const rows: DocRow[] = docs.filter((doc) => kept.has(doc.id)).map((doc) => ({
     id: doc.id,
     title: doc.title,
     categoryName: doc.category.name,
@@ -68,8 +75,17 @@ export default async function RevokedDocumentsPage({
             Revoked Documents
             <InfoTooltip text="Pulled down and awaiting re-approval. Viewable by everyone with the reason it was revoked, but only downloadable by a manager, superadmin, or the document's own uploader." />
           </h1>
-          <ViewToggle basePath="/dashboard/revoked" />
         </div>
+        <FilterBar canUpload={false} showViewToggle basePath="/dashboard/revoked">
+          <DocumentFilters
+            key={section}
+            basePath="/dashboard/revoked"
+            section={section}
+            options={filterOptions}
+            saved={savedFilters}
+            keepKeys={["view"]}
+          />
+        </FilterBar>
         {searchParams.view === "grid" ? <DocumentGrid rows={rows} /> : <DocumentTable rows={rows} />}
         </div>
         <Footer />

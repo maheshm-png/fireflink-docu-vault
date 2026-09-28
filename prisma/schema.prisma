@@ -108,6 +108,7 @@ model User {
   feedbackStatusChanged DocumentFeedback[] @relation("FeedbackStatusChangedBy")
   feedbackTagged      DocumentFeedback[] @relation("FeedbackTaggedUser")
   feedbackRepliesSent FeedbackReply[]
+  savedFilters        SavedFilter[]
 }
 
 // Admin-managed job-title options for User.designation (app/admin/
@@ -636,4 +637,22 @@ model FeedbackReply {
   editedAt   DateTime?
 
   @@index([feedbackId])
+}
+
+// A user's own named document filter for one listing section (see
+// components/DocumentFilters.tsx and lib/docFilters.ts). section is
+// "published:<categoryId|all>", "review:<status>", or "revoked", so a
+// filter saved on one category tab only shows up on that tab. params holds
+// the filter's query-string pairs ([[key, value], ...]) exactly as they're
+// applied to the page URL. Personal only: nobody else sees them.
+model SavedFilter {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  section   String
+  name      String
+  params    Json     @default("[]")
+  createdAt DateTime @default(now())
+
+  @@index([userId, section])
 }

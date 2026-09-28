@@ -9,7 +9,10 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
 import DocumentGrid from "@/components/DocumentGrid";
-import ViewToggle from "@/components/ViewToggle";
+import FilterBar from "@/components/FilterBar";
+import DocumentFilters from "@/components/DocumentFilters";
+import { filterDocs, type RawParams } from "@/lib/docFilters";
+import { getSavedFilters } from "@/lib/savedFilters";
 import { computeRoundAttempts } from "@/lib/versionRounds";
 
 // No "revoked" tab here — see app/dashboard/revoked/page.tsx instead, the
@@ -24,7 +27,7 @@ const STATUS_TABS: { key: DocStatus; label: string; icon: typeof Clock }[] = [
 export default async function ReviewDashboardPage({
   searchParams,
 }: {
-  searchParams: { status?: string; view?: string };
+  searchParams: RawParams & { status?: string; view?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
@@ -69,12 +72,14 @@ export default async function ReviewDashboardPage({
           ],
         };
 
-  const [docs, tabCounts] = await Promise.all([
+  const section = `review:${activeStatus}`;
+  const [docs, tabCounts, savedFilters] = await Promise.all([
     prisma.document.findMany({
       where: { status: activeStatus, ...baseWhere },
       include: {
         category: true,
         uploadedBy: true,
+        owner: { select: { name: true } },
         duplicateOf: true,
         // Every version, not just the latest — lib/versionRounds.ts's
         // computeRoundAttempts (used below for each row's status-badge
@@ -98,11 +103,14 @@ export default async function ReviewDashboardPage({
       where: { status: { in: STATUS_TABS.map((t) => t.key) }, ...baseWhere },
       _count: { _all: true },
     }),
+    getSavedFilters(user.id, section),
   ]);
+
+  const { options: filterOptions, kept } = filterDocs(docs, searchParams);
 
   const countByStatus = new Map(tabCounts.map((c) => [c.status, c._count._all]));
 
-  const rows: DocRow[] = docs.map((doc) => {
+  const rows: DocRow[] = docs.filter((doc) => kept.has(doc.id)).map((doc) => {
     const latestVersion = doc.versions[0];
 
     // What's actually happening right now, for the status badge's hover
@@ -215,9 +223,16 @@ export default async function ReviewDashboardPage({
           })}
         </div>
 
-        <div className="mb-4 flex justify-end">
-          <ViewToggle basePath="/dashboard/pending" />
-        </div>
+        <FilterBar canUpload={false} showViewToggle basePath="/dashboard/pending">
+          <DocumentFilters
+            key={section}
+            basePath="/dashboard/pending"
+            section={section}
+            options={filterOptions}
+            saved={savedFilters}
+            keepKeys={["status", "view"]}
+          />
+        </FilterBar>
 
         {searchParams.view === "grid" ? <DocumentGrid rows={rows} /> : <DocumentTable rows={rows} />}
         </div>
