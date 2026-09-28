@@ -7,10 +7,14 @@ import "dotenv/config";
  * restore/lifecycle action — this backfills all of them at once) or as a
  * disaster-recovery rebuild if the search index is ever lost/corrupted.
  *
+ * Also removes every soft-deleted document from the index, which clears
+ * out any that got back in after deletion (the review route used to let a
+ * deleted-but-still-pending document be approved and re-indexed).
+ *
  * Run: npm run reindex:search
  */
 import { prisma } from "../lib/prisma";
-import { indexDocument } from "../lib/search";
+import { indexDocument, removeFromIndex } from "../lib/search";
 
 async function main() {
   const docs = await prisma.document.findMany({
@@ -34,6 +38,12 @@ async function main() {
       duplicateOfTitle: doc.duplicateOf?.title ?? null,
       hasPreviewPdf: Boolean(doc.currentVersion?.previewPdfPath),
     });
+  }
+
+  const deleted = await prisma.document.findMany({ where: { deletedAt: { not: null } }, select: { id: true } });
+  console.log(`Removing ${deleted.length} deleted document(s) from the index...`);
+  for (const doc of deleted) {
+    await removeFromIndex(doc.id);
   }
   console.log("Done.");
 }

@@ -51,6 +51,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
 
+  // Deleting a pending document leaves its review rows pending, so a
+  // reviewer with the page still open from before the delete could approve
+  // it here, which published it and put it back in the search index while
+  // deletedAt was still set. Every review action is refused on a deleted
+  // document; restore it first.
+  if (document.deletedAt) {
+    return NextResponse.json(
+      { error: "This document has been deleted. Restore it before acting on its review." },
+      { status: 409 }
+    );
+  }
+
   // Undo acts on an already-APPROVED row, not a pending one — handled before
   // the pending-row guard below, which would otherwise always reject it.
   if (action === "undo-approval") {

@@ -39,6 +39,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     include: { currentVersion: true, category: true },
   });
 
+  if (document.deletedAt) {
+    return NextResponse.json({ error: "This document has been deleted. Restore it first." }, { status: 409 });
+  }
+
   if (document.status !== "published") {
     return NextResponse.json({ error: "Only published documents can be revoked" }, { status: 400 });
   }

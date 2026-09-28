@@ -22,6 +22,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
 
+  if (document.deletedAt) {
+    return NextResponse.json({ error: "This document has been deleted. Restore it first." }, { status: 409 });
+  }
+
   if (!["published", "rejected", "revoked"].includes(document.status)) {
     return NextResponse.json({ error: "Only published, rejected, or revoked documents can be archived" }, { status: 400 });
   }

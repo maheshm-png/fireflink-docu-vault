@@ -19,6 +19,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
 
+  if (document.deletedAt) {
+    return NextResponse.json({ error: "This document has been deleted. Restore it first." }, { status: 409 });
+  }
+
   if (document.status !== "archived") {
     return NextResponse.json({ error: "Only archived documents can be unarchived" }, { status: 400 });
   }
