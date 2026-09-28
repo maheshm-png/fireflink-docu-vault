@@ -12,8 +12,10 @@ import AlertModal from "@/components/AlertModal";
 // /admin/settings), only after which it's purged for good. Server-side
 // permission (manager, or the uploader deleting their own still-pending
 // submission) is re-checked in the route; this button just mirrors that
-// same rule so it doesn't render somewhere it'd 403.
-export default function DeleteButton({ documentId, title }: { documentId: string; title: string }) {
+// same rule so it doesn't render somewhere it'd 403. `permanent` is the one
+// exception to the soft delete: the uploader withdrawing their own
+// submission before any review decision, which the route purges outright.
+export default function DeleteButton({ documentId, title, permanent = false }: { documentId: string; title: string; permanent?: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,8 +48,12 @@ export default function DeleteButton({ documentId, title }: { documentId: string
 
       <ConfirmModal
         open={confirming}
-        title="Delete this document?"
-        message={`"${title}" will be hidden immediately but stays recoverable from Deleted Documents for a while before it's permanently removed.`}
+        title={permanent ? "Withdraw and delete this document?" : "Delete this document?"}
+        message={
+          permanent
+            ? `"${title}" hasn't been reviewed yet, so it will be permanently deleted right away, including its files and its review request. This can't be undone.`
+            : `"${title}" will be hidden immediately but stays recoverable from Deleted Documents for a while before it's permanently removed.`
+        }
         confirmLabel="Yes, delete"
         danger
         busy={busy}

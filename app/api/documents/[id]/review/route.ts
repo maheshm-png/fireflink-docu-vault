@@ -49,7 +49,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const body = await req.json();
   const action: string = body.action ?? "decide";
 
-  const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
+  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  // Gone entirely when the uploader withdrew it before review (purged, see
+  // DELETE /api/documents/:id), e.g. the reviewer's page was already open.
+  if (!document) {
+    return NextResponse.json({ error: "This document was withdrawn by its uploader and no longer exists." }, { status: 404 });
+  }
 
   // Deleting a pending document leaves its review rows pending, so a
   // reviewer with the page still open from before the delete could approve

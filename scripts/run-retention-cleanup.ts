@@ -21,6 +21,7 @@ import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { deleteFile } from "../lib/storage";
 import { notifyManagerRetentionAlert } from "../lib/notify";
+import { purgeDocument } from "../lib/purgeDocument";
 import { getAppSettings } from "../lib/settings";
 import { computeRoundAttempts } from "../lib/versionRounds";
 
@@ -28,43 +29,13 @@ async function purgeExpiredDeletedDocuments(retentionDays: number) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
   const docs = await prisma.document.findMany({
     where: { deletedAt: { lte: cutoff } },
-    include: { versions: true },
+    select: { id: true, title: true },
   });
 
   const purged: { title: string }[] = [];
 
   for (const doc of docs) {
-    for (const version of doc.versions) {
-      const keys = [version.filePath, version.previewPdfPath].filter((k): k is string => Boolean(k));
-      for (const key of keys) {
-        try {
-          await deleteFile(key);
-        } catch (err) {
-          // Best-effort: an orphaned storage object is harmless and invisible;
-          // leaving the DB row behind because one blob failed to delete would
-          // be worse, so we log and continue rather than aborting the purge.
-          console.error(`Failed to delete storage object ${key}:`, err);
-        }
-      }
-    }
-
-    // Children first (all FKs to Document are RESTRICT, not CASCADE), parent
-    // last, one transaction — same shape as the original hard-delete route.
-    // inlineComment must come before reviewRequest — InlineComment also has
-    // a RESTRICT FK into ReviewRequest, so any left over would block that
-    // delete too, not just the final document.delete.
-    await prisma.$transaction([
-      prisma.document.update({ where: { id: doc.id }, data: { currentVersionId: null } }),
-      prisma.documentEvent.deleteMany({ where: { documentId: doc.id } }),
-      prisma.stalenessFlag.deleteMany({ where: { documentId: doc.id } }),
-      prisma.inlineComment.deleteMany({ where: { documentId: doc.id } }),
-      prisma.documentFeedback.deleteMany({ where: { documentId: doc.id } }),
-      prisma.shareLink.deleteMany({ where: { documentId: doc.id } }),
-      prisma.reviewRequest.deleteMany({ where: { documentId: doc.id } }),
-      prisma.documentVersion.deleteMany({ where: { documentId: doc.id } }),
-      prisma.document.delete({ where: { id: doc.id } }),
-    ]);
-
+    await purgeDocument(doc.id);
     purged.push({ title: doc.title });
   }
 

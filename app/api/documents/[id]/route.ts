@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { indexDocument, removeFromIndex } from "@/lib/search";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { isWithdrawalBeforeReview, purgeDocument } from "@/lib/purgeDocument";
 import { validateMetadataAgainstSchema, type CategoryFormField } from "@/lib/formSchema";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
 
@@ -227,6 +228,19 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       { error: "Only a manager who was part of this document's review can delete it once it's been approved." },
       { status: 403 }
     );
+  }
+
+  // The uploader withdrawing their own submission before any reviewer has
+  // decided on it is purged outright, not soft-deleted: nothing about it
+  // was ever approved, so there's nothing to recover, and keeping it would
+  // leave it on the reviewer's side (their open review page, their
+  // notification) after the uploader pulled it. Anything that has been
+  // through a decision (approved, rejected, or revoked back into review)
+  // still takes the recoverable soft delete below.
+  if (await isWithdrawalBeforeReview(document, user.id)) {
+    await purgeDocument(document.id);
+    await logAudit({ userId: user.id, action: "purge", documentId: document.id, documentTitle: document.title });
+    return NextResponse.json({ ok: true, purged: true });
   }
 
   // Unconditional: a document back in re-review (status pending_review or

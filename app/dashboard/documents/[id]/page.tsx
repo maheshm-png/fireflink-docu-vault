@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronLeft, Ban } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
@@ -51,7 +51,7 @@ export default async function DocumentDetailPage({
   // is already known) — running them together instead of one after another
   // turns 3 round-trips into 1 on the single most-visited page in the app.
   const [document, , reviewRequests] = await Promise.all([
-    prisma.document.findUniqueOrThrow({
+    prisma.document.findUnique({
       where: { id: params.id },
       include: {
         category: true,
@@ -86,6 +86,9 @@ export default async function DocumentDetailPage({
       orderBy: [{ roundNumber: "asc" }, { createdAt: "asc" }],
     }),
   ]);
+  // Purged outright when its uploader withdrew it before review (see
+  // DELETE /api/documents/:id), so an old link or open tab lands here.
+  if (!document) notFound();
 
   // Deleted documents are only reachable by manager/superadmin (to decide
   // whether to restore them) — everyone else, including a direct link,
@@ -236,6 +239,14 @@ export default async function DocumentDetailPage({
     !isDeleted &&
     ((can(user.role, "deleteDocument") && (!everApproved || inReviewCycle)) ||
       (document.status === "pending_review" && document.uploadedById === user.id));
+  // Same rule as isWithdrawalBeforeReview (lib/purgeDocument.ts), which the
+  // DELETE route uses to purge instead of soft-delete: tells the button to
+  // warn that this can't be undone.
+  const deletePurges =
+    document.status === "pending_review" &&
+    document.uploadedById === user.id &&
+    !document.revokedAt &&
+    reviewRequests.every((r) => r.status === "pending");
 
   const canArchive =
     !isDeleted &&
@@ -1013,7 +1024,7 @@ export default async function DocumentDetailPage({
                 {(canArchive || canUnarchive) && (
                   <ArchiveButton documentId={document.id} archived={document.status === "archived"} />
                 )}
-                {canDelete && <DeleteButton documentId={document.id} title={document.title} />}
+                {canDelete && <DeleteButton documentId={document.id} title={document.title} permanent={deletePurges} />}
               </div>
             )}
             {!isDeleted && document.externalUrl && (
