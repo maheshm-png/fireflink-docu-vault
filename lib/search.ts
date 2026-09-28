@@ -1,4 +1,5 @@
 import { MeiliSearch } from "meilisearch";
+import { prisma } from "./prisma";
 
 const client = new MeiliSearch({
   host: process.env.MEILISEARCH_HOST!, // self-hosted on the Oracle VM alongside MinIO
@@ -89,22 +90,33 @@ export async function search(query: string, filters: string[] = [], limit = 25) 
 }
 
 /**
- * Published-document count per category NAME, straight from the same index
- * (and the same `status = "published"` filter) the Published Documents list
- * reads from — so a Home tile or category tab count always matches what
- * clicking through actually lists. Counting from Prisma instead drifted:
- * legacy documents with a stale, never-approved currentVersionId got
- * counted there but were never in the index. Empty map on an outage, same
+ * Published-document count per category ID. Which documents are published
+ * comes from the search index (the same source the Published Documents list
+ * reads from, so a tab or Home tile count always equals what it lists), but
+ * which category each belongs to comes from the database. Matching on the
+ * indexed categoryName instead broke whenever a category was renamed: every
+ * document indexed before the rename still carried the old name, so the
+ * renamed tab counted and listed nothing. Soft-deleted documents that are
+ * still in the index are skipped too. Empty map on an outage, same
  * best-effort fallback as search() (the list would be empty then too).
  */
 export async function publishedCountsByCategory(): Promise<Map<string, number>> {
   try {
-    const res = await client.index(INDEX).search("", {
-      filter: 'status = "published"',
-      facets: ["categoryName"],
-      limit: 0,
-    });
-    return new Map(Object.entries(res.facetDistribution?.categoryName ?? {}));
+    const ids: string[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await client
+        .index(INDEX)
+        .getDocuments<{ id: string; status: string }>({ fields: ["id", "status"], limit: pageSize, offset });
+      ids.push(...page.results.filter((d) => d.status === "published").map((d) => d.id));
+      if (page.results.length < pageSize) break;
+    }
+    const docs = ids.length
+      ? await prisma.document.findMany({ where: { id: { in: ids }, deletedAt: null }, select: { categoryId: true } })
+      : [];
+    const counts = new Map<string, number>();
+    for (const d of docs) counts.set(d.categoryId, (counts.get(d.categoryId) ?? 0) + 1);
+    return counts;
   } catch (err) {
     console.error("Meilisearch category counts failed (index may be unreachable):", err);
     return new Map();
@@ -133,5 +145,35 @@ export async function searchScored(query: string, filters: string[] = [], limit 
     // break the AI assistant either, it should just have nothing to cite.
     console.error(`Meilisearch searchScored failed for query "${query}" (index may be unreachable):`, err);
     return { hits: [], processingTimeMs: 0, query, limit, offset: 0 };
+  }
+}
+
+/** Every indexed document's id and categoryName, paged through the whole index. */
+export async function allIndexedCategoryNames(): Promise<{ id: string; categoryName: string }[]> {
+  const out: { id: string; categoryName: string }[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await client
+      .index(INDEX)
+      .getDocuments<{ id: string; categoryName: string }>({ fields: ["id", "categoryName"], limit: pageSize, offset });
+    out.push(...page.results);
+    if (page.results.length < pageSize) return out;
+  }
+}
+
+/**
+ * Sets categoryName on already-indexed documents. The index stores the
+ * category's NAME (the Published list, its tab counts and the Home tiles
+ * all filter/facet on it), so renaming a category without this left every
+ * document in it matching the old name only, and the renamed tab showed
+ * nothing. Partial update: only ids that are actually in the index are
+ * passed in, so nothing half-empty gets created. Best-effort like the rest.
+ */
+export async function setIndexedCategoryName(ids: string[], categoryName: string) {
+  if (ids.length === 0) return;
+  try {
+    await client.index(INDEX).updateDocuments(ids.map((id) => ({ id, categoryName })), { primaryKey: "id" });
+  } catch (err) {
+    console.error(`Meilisearch category rename to "${categoryName}" failed (search index may be stale):`, err);
   }
 }

@@ -11,10 +11,15 @@ import "dotenv/config";
  * out any that got back in after deletion (the review route used to let a
  * deleted-but-still-pending document be approved and re-indexed).
  *
+ * Also re-syncs categoryName on every indexed document (including ones back
+ * in re-review whose prior approved version is still listed), repairing
+ * documents that vanished from a category tab after the category was
+ * renamed before renames updated the index.
+ *
  * Run: npm run reindex:search
  */
 import { prisma } from "../lib/prisma";
-import { indexDocument, removeFromIndex } from "../lib/search";
+import { indexDocument, removeFromIndex, allIndexedCategoryNames, setIndexedCategoryName } from "../lib/search";
 
 async function main() {
   const docs = await prisma.document.findMany({
@@ -44,6 +49,25 @@ async function main() {
   console.log(`Removing ${deleted.length} deleted document(s) from the index...`);
   for (const doc of deleted) {
     await removeFromIndex(doc.id);
+  }
+  const indexed = await allIndexedCategoryNames();
+  const categoryOf = new Map(
+    (
+      await prisma.document.findMany({
+        where: { id: { in: indexed.map((d) => d.id) } },
+        select: { id: true, category: { select: { name: true } } },
+      })
+    ).map((d) => [d.id, d.category.name])
+  );
+  const byName = new Map<string, string[]>();
+  for (const d of indexed) {
+    const name = categoryOf.get(d.id);
+    if (!name || name === d.categoryName) continue;
+    byName.set(name, [...(byName.get(name) ?? []), d.id]);
+  }
+  for (const [name, ids] of byName) {
+    console.log(`Updating category name to "${name}" on ${ids.length} indexed document(s)...`);
+    await setIndexedCategoryName(ids, name);
   }
   console.log("Done.");
 }

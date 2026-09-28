@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { assertCan } from "@/lib/rbac";
 import { dedupeFieldIds, type CategoryFormField } from "@/lib/formSchema";
 import { prisma } from "@/lib/prisma";
+import { allIndexedCategoryNames, setIndexedCategoryName } from "@/lib/search";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
@@ -27,6 +28,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { name, description, reviewCycleDays, formSchema } = await req.json();
   const fields: CategoryFormField[] | undefined = formSchema ? dedupeFieldIds(formSchema) : undefined;
 
+  const before = await prisma.category.findUniqueOrThrow({ where: { id: params.id }, select: { name: true } });
+
   const category = await prisma.category.update({
     where: { id: params.id },
     data: {
@@ -36,5 +39,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(fields !== undefined ? { formSchema: fields } : {}),
     },
   });
+  // The search index keys documents to their category by name, so a
+  // rename has to be carried over to every indexed document in it or they
+  // all drop out of the renamed tab (see setIndexedCategoryName).
+  if (category.name !== before.name) {
+    try {
+      const [docs, indexed] = await Promise.all([
+        prisma.document.findMany({ where: { categoryId: category.id }, select: { id: true } }),
+        allIndexedCategoryNames(),
+      ]);
+      const inCategory = new Set(docs.map((d) => d.id));
+      await setIndexedCategoryName(
+        indexed.filter((d) => inCategory.has(d.id)).map((d) => d.id),
+        category.name
+      );
+    } catch (err) {
+      console.error(`Could not carry category rename "${before.name}" -> "${category.name}" into the search index:`, err);
+    }
+  }
+
   return NextResponse.json({ category });
 }

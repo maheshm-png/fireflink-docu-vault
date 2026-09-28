@@ -21,7 +21,7 @@ export default async function HomePage() {
   // (app/dashboard/page.tsx): each tile below links straight into that page
   // pre-filtered to the category it represents, so the count shown here is
   // exactly what clicking through will show.
-  const [categories, countByCategoryName, unreadPublishedNotifications] = await Promise.all([
+  const [categories, countByCategoryId, unreadPublishedNotifications] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     publishedCountsByCategory(),
     // Seeds NewDocumentsProvider below, same as app/dashboard/page.tsx — this
@@ -92,7 +92,7 @@ export default async function HomePage() {
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {categories.map((c) => {
-                const count = countByCategoryName.get(c.name) ?? 0;
+                const count = countByCategoryId.get(c.id) ?? 0;
                 return (
                   <Link
                     key={c.id}
