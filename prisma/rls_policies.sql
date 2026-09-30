@@ -2,6 +2,10 @@
 -- Apply after `prisma migrate deploy`, via Supabase SQL editor.
 -- These are a second, DB-level enforcement layer — the app must never
 -- rely on the frontend alone to hide unauthorized data.
+--
+-- Safe to re-run in full at any time: every `create policy` is preceded by
+-- a matching `drop policy if exists`, and `enable row level security` is
+-- already a no-op when RLS is already on.
 
 alter table "Document" enable row level security;
 alter table "DocumentVersion" enable row level security;
@@ -17,6 +21,7 @@ $$ language sql stable;
 
 -- Documents: everyone sees published docs; only uploader/owner/manager/
 -- superadmin see pending/rejected ones.
+drop policy if exists "view_published_docs" on "Document";
 create policy "view_published_docs" on "Document"
   for select using (
     status = 'published'
@@ -25,23 +30,27 @@ create policy "view_published_docs" on "Document"
     or current_role_name() in ('manager','superadmin')
   );
 
+drop policy if exists "insert_docs_uploaders" on "Document";
 create policy "insert_docs_uploaders" on "Document"
   for insert with check (
     current_role_name() in ('contributor','manager','superadmin')
   );
 
+drop policy if exists "update_docs_owner_or_admin" on "Document";
 create policy "update_docs_owner_or_admin" on "Document"
   for update using (
     "uploadedById" = auth.uid()::text
     or current_role_name() in ('manager','superadmin')
   );
 
+drop policy if exists "delete_docs_admin_only" on "Document";
 create policy "delete_docs_admin_only" on "Document"
   for delete using (
     current_role_name() in ('manager','superadmin')
   );
 
 -- Review requests: only manager/superadmin can approve; requester can view own.
+drop policy if exists "view_own_or_admin_reviews" on "ReviewRequest";
 create policy "view_own_or_admin_reviews" on "ReviewRequest"
   for select using (
     "requestedById" = auth.uid()::text
@@ -55,26 +64,31 @@ create policy "view_own_or_admin_reviews" on "ReviewRequest"
 -- file after that change is clean.
 drop policy if exists "resolve_reviews_admin_only" on "ReviewRequest";
 
+drop policy if exists "resolve_reviews_manager_only" on "ReviewRequest";
 create policy "resolve_reviews_manager_only" on "ReviewRequest"
   for update using (
     current_role_name() = 'manager'
   );
 
 -- Audit log: append-only, readable by manager/superadmin only.
+drop policy if exists "audit_read_admin_only" on "AuditLog";
 create policy "audit_read_admin_only" on "AuditLog"
   for select using (
     current_role_name() in ('manager','superadmin')
   );
 
+drop policy if exists "audit_insert_any_authenticated" on "AuditLog";
 create policy "audit_insert_any_authenticated" on "AuditLog"
   for insert with check (auth.uid() is not null);
 
 -- Users: only superadmin can manage; users can read their own row.
+drop policy if exists "users_read_self_or_admin" on "User";
 create policy "users_read_self_or_admin" on "User"
   for select using (
     id = auth.uid()::text or current_role_name() = 'superadmin'
   );
 
+drop policy if exists "users_write_admin_only" on "User";
 create policy "users_write_admin_only" on "User"
   for update using (current_role_name() = 'superadmin');
 
@@ -82,12 +96,15 @@ create policy "users_write_admin_only" on "User"
 -- only superadmin manages the option list itself (app/admin/designations).
 alter table "Designation" enable row level security;
 
+drop policy if exists "designations_read_all" on "Designation";
 create policy "designations_read_all" on "Designation"
   for select using (auth.uid() is not null);
 
+drop policy if exists "designations_write_admin_only" on "Designation";
 create policy "designations_write_admin_only" on "Designation"
   for insert with check (current_role_name() = 'superadmin');
 
+drop policy if exists "designations_delete_admin_only" on "Designation";
 create policy "designations_delete_admin_only" on "Designation"
   for delete using (current_role_name() = 'superadmin');
 
@@ -95,12 +112,15 @@ create policy "designations_delete_admin_only" on "Designation"
 -- only manager/superadmin can create or edit one (including its form).
 alter table "Category" enable row level security;
 
+drop policy if exists "categories_read_all" on "Category";
 create policy "categories_read_all" on "Category"
   for select using (true);
 
+drop policy if exists "categories_write_admin_only" on "Category";
 create policy "categories_write_admin_only" on "Category"
   for insert with check (current_role_name() in ('manager','superadmin'));
 
+drop policy if exists "categories_update_admin_only" on "Category";
 create policy "categories_update_admin_only" on "Category"
   for update using (current_role_name() in ('manager','superadmin'));
 
@@ -108,15 +128,19 @@ create policy "categories_update_admin_only" on "Category"
 -- ticker); only manager/superadmin can post, edit, or deactivate one.
 alter table "Announcement" enable row level security;
 
+drop policy if exists "announcements_read_all" on "Announcement";
 create policy "announcements_read_all" on "Announcement"
   for select using (auth.uid() is not null);
 
+drop policy if exists "announcements_write_admin_only" on "Announcement";
 create policy "announcements_write_admin_only" on "Announcement"
   for insert with check (current_role_name() in ('manager','superadmin'));
 
+drop policy if exists "announcements_update_admin_only" on "Announcement";
 create policy "announcements_update_admin_only" on "Announcement"
   for update using (current_role_name() in ('manager','superadmin'));
 
+drop policy if exists "announcements_delete_admin_only" on "Announcement";
 create policy "announcements_delete_admin_only" on "Announcement"
   for delete using (current_role_name() in ('manager','superadmin'));
 
@@ -125,12 +149,15 @@ create policy "announcements_delete_admin_only" on "Announcement"
 -- (app/admin/teams). Same shape as Designation above.
 alter table "Team" enable row level security;
 
+drop policy if exists "teams_read_all" on "Team";
 create policy "teams_read_all" on "Team"
   for select using (auth.uid() is not null);
 
+drop policy if exists "teams_write_admin_only" on "Team";
 create policy "teams_write_admin_only" on "Team"
   for insert with check (current_role_name() = 'superadmin');
 
+drop policy if exists "teams_delete_admin_only" on "Team";
 create policy "teams_delete_admin_only" on "Team"
   for delete using (current_role_name() = 'superadmin');
 
@@ -147,15 +174,19 @@ alter table "PasswordResetOtp" enable row level security;
 -- gate. Only superadmin manages the tile list (app/admin/workspace-apps).
 alter table "WorkspaceApp" enable row level security;
 
+drop policy if exists "workspace_apps_read_all" on "WorkspaceApp";
 create policy "workspace_apps_read_all" on "WorkspaceApp"
   for select using (true);
 
+drop policy if exists "workspace_apps_write_admin_only" on "WorkspaceApp";
 create policy "workspace_apps_write_admin_only" on "WorkspaceApp"
   for insert with check (current_role_name() = 'superadmin');
 
+drop policy if exists "workspace_apps_update_admin_only" on "WorkspaceApp";
 create policy "workspace_apps_update_admin_only" on "WorkspaceApp"
   for update using (current_role_name() = 'superadmin');
 
+drop policy if exists "workspace_apps_delete_admin_only" on "WorkspaceApp";
 create policy "workspace_apps_delete_admin_only" on "WorkspaceApp"
   for delete using (current_role_name() = 'superadmin');
 
@@ -164,6 +195,7 @@ create policy "workspace_apps_delete_admin_only" on "WorkspaceApp"
 -- manager/superadmin lifecycle action.
 alter table "StalenessFlag" enable row level security;
 
+drop policy if exists "staleness_read_via_document" on "StalenessFlag";
 create policy "staleness_read_via_document" on "StalenessFlag"
   for select using (
     exists (
@@ -178,6 +210,7 @@ create policy "staleness_read_via_document" on "StalenessFlag"
     )
   );
 
+drop policy if exists "staleness_write_admin_only" on "StalenessFlag";
 create policy "staleness_write_admin_only" on "StalenessFlag"
   for update using (current_role_name() in ('manager','superadmin'));
 
@@ -187,6 +220,7 @@ create policy "staleness_write_admin_only" on "StalenessFlag"
 -- else's.
 alter table "DocumentEvent" enable row level security;
 
+drop policy if exists "document_events_read" on "DocumentEvent";
 create policy "document_events_read" on "DocumentEvent"
   for select using (
     current_role_name() in ('manager','superadmin')
@@ -197,6 +231,7 @@ create policy "document_events_read" on "DocumentEvent"
     )
   );
 
+drop policy if exists "document_events_insert_self" on "DocumentEvent";
 create policy "document_events_insert_self" on "DocumentEvent"
   for insert with check ("userId" = auth.uid()::text);
 
@@ -204,9 +239,11 @@ create policy "document_events_insert_self" on "DocumentEvent"
 -- (app/admin/settings) — manager/superadmin only, both ways.
 alter table "AppSettings" enable row level security;
 
+drop policy if exists "app_settings_read_admin_only" on "AppSettings";
 create policy "app_settings_read_admin_only" on "AppSettings"
   for select using (current_role_name() in ('manager','superadmin'));
 
+drop policy if exists "app_settings_write_admin_only" on "AppSettings";
 create policy "app_settings_write_admin_only" on "AppSettings"
   for update using (current_role_name() in ('manager','superadmin'));
 
@@ -217,9 +254,11 @@ create policy "app_settings_write_admin_only" on "AppSettings"
 -- directly through PostgREST.
 alter table "Notification" enable row level security;
 
+drop policy if exists "notifications_read_own" on "Notification";
 create policy "notifications_read_own" on "Notification"
   for select using ("userId" = auth.uid()::text);
 
+drop policy if exists "notifications_update_own" on "Notification";
 create policy "notifications_update_own" on "Notification"
   for update using ("userId" = auth.uid()::text);
 
@@ -232,6 +271,7 @@ create policy "notifications_update_own" on "Notification"
 -- already requires.
 alter table "ShareLink" enable row level security;
 
+drop policy if exists "share_links_manage" on "ShareLink";
 create policy "share_links_manage" on "ShareLink"
   for all using (
     current_role_name() in ('manager','superadmin')
@@ -247,6 +287,7 @@ create policy "share_links_manage" on "ShareLink"
 -- may add or edit it.
 alter table "InlineComment" enable row level security;
 
+drop policy if exists "inline_comments_read" on "InlineComment";
 create policy "inline_comments_read" on "InlineComment"
   for select using (
     "reviewerId" = auth.uid()::text
@@ -257,9 +298,11 @@ create policy "inline_comments_read" on "InlineComment"
     )
   );
 
+drop policy if exists "inline_comments_insert_self" on "InlineComment";
 create policy "inline_comments_insert_self" on "InlineComment"
   for insert with check ("reviewerId" = auth.uid()::text);
 
+drop policy if exists "inline_comments_update_self" on "InlineComment";
 create policy "inline_comments_update_self" on "InlineComment"
   for update using ("reviewerId" = auth.uid()::text);
 
@@ -271,12 +314,15 @@ create policy "inline_comments_update_self" on "InlineComment"
 -- canTriage rule the feedback route enforces.
 alter table "DocumentFeedback" enable row level security;
 
+drop policy if exists "document_feedback_read_all" on "DocumentFeedback";
 create policy "document_feedback_read_all" on "DocumentFeedback"
   for select using (auth.uid() is not null);
 
+drop policy if exists "document_feedback_insert_self" on "DocumentFeedback";
 create policy "document_feedback_insert_self" on "DocumentFeedback"
   for insert with check ("userId" = auth.uid()::text);
 
+drop policy if exists "document_feedback_update" on "DocumentFeedback";
 create policy "document_feedback_update" on "DocumentFeedback"
   for update using (
     "userId" = auth.uid()::text
@@ -287,6 +333,7 @@ create policy "document_feedback_update" on "DocumentFeedback"
     )
   );
 
+drop policy if exists "document_feedback_delete" on "DocumentFeedback";
 create policy "document_feedback_delete" on "DocumentFeedback"
   for delete using (
     "userId" = auth.uid()::text
@@ -303,9 +350,11 @@ create policy "document_feedback_delete" on "DocumentFeedback"
 -- route's own enforcement. A reply's own author may edit its text.
 alter table "FeedbackReply" enable row level security;
 
+drop policy if exists "feedback_replies_read_all" on "FeedbackReply";
 create policy "feedback_replies_read_all" on "FeedbackReply"
   for select using (auth.uid() is not null);
 
+drop policy if exists "feedback_replies_insert_triage_only" on "FeedbackReply";
 create policy "feedback_replies_insert_triage_only" on "FeedbackReply"
   for insert with check (
     "authorId" = auth.uid()::text
@@ -319,6 +368,7 @@ create policy "feedback_replies_insert_triage_only" on "FeedbackReply"
     )
   );
 
+drop policy if exists "feedback_replies_update_self" on "FeedbackReply";
 create policy "feedback_replies_update_self" on "FeedbackReply"
   for update using ("authorId" = auth.uid()::text);
 
@@ -326,6 +376,7 @@ create policy "feedback_replies_update_self" on "FeedbackReply"
 -- create, edit, or delete one (lib/docFilters.ts).
 alter table "SavedFilter" enable row level security;
 
+drop policy if exists "saved_filters_own" on "SavedFilter";
 create policy "saved_filters_own" on "SavedFilter"
   for all using ("userId" = auth.uid()::text)
   with check ("userId" = auth.uid()::text);
