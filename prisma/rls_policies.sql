@@ -141,3 +141,191 @@ create policy "teams_delete_admin_only" on "Team"
 -- matching policy denies all PostgREST access outright, which is the
 -- correct default for a table holding email + code hashes.
 alter table "PasswordResetOtp" enable row level security;
+
+-- Workspace apps: tiles on the pre-login launcher (app/page.tsx) — readable
+-- by anyone, including signed-out visitors, since that page has no auth
+-- gate. Only superadmin manages the tile list (app/admin/workspace-apps).
+alter table "WorkspaceApp" enable row level security;
+
+create policy "workspace_apps_read_all" on "WorkspaceApp"
+  for select using (true);
+
+create policy "workspace_apps_write_admin_only" on "WorkspaceApp"
+  for insert with check (current_role_name() = 'superadmin');
+
+create policy "workspace_apps_update_admin_only" on "WorkspaceApp"
+  for update using (current_role_name() = 'superadmin');
+
+create policy "workspace_apps_delete_admin_only" on "WorkspaceApp"
+  for delete using (current_role_name() = 'superadmin');
+
+-- Staleness flags: visible to whoever can already see the underlying
+-- document; resolving one (scripts/run-staleness-check.ts aside) is a
+-- manager/superadmin lifecycle action.
+alter table "StalenessFlag" enable row level security;
+
+create policy "staleness_read_via_document" on "StalenessFlag"
+  for select using (
+    exists (
+      select 1 from "Document" d
+      where d.id = "StalenessFlag"."documentId"
+        and (
+          d.status = 'published'
+          or d."uploadedById" = auth.uid()::text
+          or d."ownerId" = auth.uid()::text
+          or current_role_name() in ('manager','superadmin')
+        )
+    )
+  );
+
+create policy "staleness_write_admin_only" on "StalenessFlag"
+  for update using (current_role_name() in ('manager','superadmin'));
+
+-- Document events (view/download log): readable by manager/superadmin and
+-- the document's own uploader/owner (the per-document activity page); a
+-- user may only ever log an event under their own userId, never someone
+-- else's.
+alter table "DocumentEvent" enable row level security;
+
+create policy "document_events_read" on "DocumentEvent"
+  for select using (
+    current_role_name() in ('manager','superadmin')
+    or exists (
+      select 1 from "Document" d
+      where d.id = "DocumentEvent"."documentId"
+        and (d."uploadedById" = auth.uid()::text or d."ownerId" = auth.uid()::text)
+    )
+  );
+
+create policy "document_events_insert_self" on "DocumentEvent"
+  for insert with check ("userId" = auth.uid()::text);
+
+-- App settings: singleton row of org-wide retention config
+-- (app/admin/settings) — manager/superadmin only, both ways.
+alter table "AppSettings" enable row level security;
+
+create policy "app_settings_read_admin_only" on "AppSettings"
+  for select using (current_role_name() in ('manager','superadmin'));
+
+create policy "app_settings_write_admin_only" on "AppSettings"
+  for update using (current_role_name() in ('manager','superadmin'));
+
+-- Notifications: strictly personal — a user only ever reads or marks read
+-- their own bell/slide-out entries (components/NotificationBell.tsx). No
+-- insert policy: these are only ever created by the app's own service-role
+-- connection when a document is published/revoked/etc., never by a user
+-- directly through PostgREST.
+alter table "Notification" enable row level security;
+
+create policy "notifications_read_own" on "Notification"
+  for select using ("userId" = auth.uid()::text);
+
+create policy "notifications_update_own" on "Notification"
+  for update using ("userId" = auth.uid()::text);
+
+-- Share links: the "anyone with the link" token itself must never be
+-- listable through PostgREST — the public share viewer (app/share/[token])
+-- resolves a token server-side through the app's service-role connection,
+-- so browsers never need direct table access. Only the document's
+-- uploader/owner or a manager/superadmin may see or manage a doc's link
+-- (components/ShareSettings.tsx), same permission shareEnabled toggling
+-- already requires.
+alter table "ShareLink" enable row level security;
+
+create policy "share_links_manage" on "ShareLink"
+  for all using (
+    current_role_name() in ('manager','superadmin')
+    or exists (
+      select 1 from "Document" d
+      where d.id = "ShareLink"."documentId"
+        and (d."uploadedById" = auth.uid()::text or d."ownerId" = auth.uid()::text)
+    )
+  );
+
+-- Inline review comments: visible to the assigned reviewer, the review's
+-- requester, and manager/superadmin. Only the reviewer who wrote a comment
+-- may add or edit it.
+alter table "InlineComment" enable row level security;
+
+create policy "inline_comments_read" on "InlineComment"
+  for select using (
+    "reviewerId" = auth.uid()::text
+    or current_role_name() in ('manager','superadmin')
+    or exists (
+      select 1 from "ReviewRequest" rr
+      where rr.id = "InlineComment"."reviewRequestId" and rr."requestedById" = auth.uid()::text
+    )
+  );
+
+create policy "inline_comments_insert_self" on "InlineComment"
+  for insert with check ("reviewerId" = auth.uid()::text);
+
+create policy "inline_comments_update_self" on "InlineComment"
+  for update using ("reviewerId" = auth.uid()::text);
+
+-- Document feedback: open to any authenticated user, matching the app's own
+-- "ANY authenticated user" collection model on published, feedback-enabled
+-- documents (components/DocumentFeedback.tsx). Only the author edits their
+-- own comment text; triaging (status/responseNote) or deleting is the
+-- author, the document's own uploader, or manager/superadmin — the same
+-- canTriage rule the feedback route enforces.
+alter table "DocumentFeedback" enable row level security;
+
+create policy "document_feedback_read_all" on "DocumentFeedback"
+  for select using (auth.uid() is not null);
+
+create policy "document_feedback_insert_self" on "DocumentFeedback"
+  for insert with check ("userId" = auth.uid()::text);
+
+create policy "document_feedback_update" on "DocumentFeedback"
+  for update using (
+    "userId" = auth.uid()::text
+    or current_role_name() in ('manager','superadmin')
+    or exists (
+      select 1 from "Document" d
+      where d.id = "DocumentFeedback"."documentId" and d."uploadedById" = auth.uid()::text
+    )
+  );
+
+create policy "document_feedback_delete" on "DocumentFeedback"
+  for delete using (
+    "userId" = auth.uid()::text
+    or current_role_name() in ('manager','superadmin')
+    or exists (
+      select 1 from "Document" d
+      where d.id = "DocumentFeedback"."documentId" and d."uploadedById" = auth.uid()::text
+    )
+  );
+
+-- Feedback replies: same read audience as the feedback thread they belong
+-- to; only whoever could have triaged the parent item (manager/superadmin
+-- or the document's own uploader) may post one, matching the replies
+-- route's own enforcement. A reply's own author may edit its text.
+alter table "FeedbackReply" enable row level security;
+
+create policy "feedback_replies_read_all" on "FeedbackReply"
+  for select using (auth.uid() is not null);
+
+create policy "feedback_replies_insert_triage_only" on "FeedbackReply"
+  for insert with check (
+    "authorId" = auth.uid()::text
+    and (
+      current_role_name() in ('manager','superadmin')
+      or exists (
+        select 1 from "DocumentFeedback" f
+        join "Document" d on d.id = f."documentId"
+        where f.id = "FeedbackReply"."feedbackId" and d."uploadedById" = auth.uid()::text
+      )
+    )
+  );
+
+create policy "feedback_replies_update_self" on "FeedbackReply"
+  for update using ("authorId" = auth.uid()::text);
+
+-- Saved filters: personal only — nobody but the owning user may ever read,
+-- create, edit, or delete one (lib/docFilters.ts).
+alter table "SavedFilter" enable row level security;
+
+create policy "saved_filters_own" on "SavedFilter"
+  for all using ("userId" = auth.uid()::text)
+  with check ("userId" = auth.uid()::text);
