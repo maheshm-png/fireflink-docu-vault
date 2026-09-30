@@ -329,3 +329,10 @@ alter table "SavedFilter" enable row level security;
 create policy "saved_filters_own" on "SavedFilter"
   for all using ("userId" = auth.uid()::text)
   with check ("userId" = auth.uid()::text);
+
+-- Prisma's own migration-history table — not part of schema.prisma, but
+-- Prisma creates it in the public schema, so it's just as exposed through
+-- PostgREST as any app table. No policies: it's never meant to be queried
+-- by anyone but `prisma migrate deploy` itself over the direct/service-role
+-- connection, so enabling RLS with nothing else denies all PostgREST access.
+alter table "_prisma_migrations" enable row level security;
