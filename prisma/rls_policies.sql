@@ -14,10 +14,12 @@ alter table "AuditLog" enable row level security;
 alter table "User" enable row level security;
 
 -- Helper: current user's role, pulled from the User table via the JWT's
--- sub claim (Supabase Auth sets auth.uid()).
+-- sub claim (Supabase Auth sets auth.uid()). search_path is pinned so an
+-- attacker-controlled search_path on the calling session can't shadow the
+-- unqualified "User" reference below with a table from another schema.
 create or replace function current_role_name() returns text as $$
   select role::text from "User" where id = auth.uid()::text
-$$ language sql stable;
+$$ language sql stable set search_path = public;
 
 -- Documents: everyone sees published docs; only uploader/owner/manager/
 -- superadmin see pending/rejected ones.
