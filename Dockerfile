@@ -61,10 +61,18 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 # - openssl: required by Prisma's query engine at runtime
-# - libreoffice + fontconfig/fonts-dejavu: headless PPT/Word/Excel -> PDF
-#   conversion for document previews (lib/officeConvert.ts, lib/storage.ts).
-#   Optional at the app level (falls back gracefully if missing) but needed
-#   here for that feature to actually work in production.
+# - libreoffice + fontconfig: headless PPT/Word/Excel -> PDF conversion for
+#   document previews and the "download as PDF" option (lib/officeConvert.ts,
+#   lib/storage.ts). Optional at the app level (falls back gracefully if
+#   missing) but needed here for that feature to actually work in production.
+# - fonts: Office files reference Calibri/Cambria/Arial/Times New Roman/etc.,
+#   none of which ship on Linux. With only DejaVu installed every one of them
+#   fell back to DejaVu Sans, which is far wider, so lines rewrapped, tables
+#   overflowed and page breaks moved in the converted PDF. The crosextra and
+#   Liberation families are metric-compatible clones (identical glyph widths)
+#   that LibreOffice and fontconfig substitute automatically; Noto covers
+#   non-Latin scripts. docker/fonts.conf aliases the remaining common Office
+#   fonts that have no free clone to the closest-width match.
 # - cron: only used by the separate `cron` compose service (same image,
 #   different entrypoint/command) that runs the scheduled maintenance
 #   scripts below — unused, harmless weight in the `app` service itself.
@@ -73,9 +81,18 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
       openssl \
       fontconfig \
       fonts-dejavu \
+      fonts-crosextra-carlito \
+      fonts-crosextra-caladea \
+      fonts-liberation \
+      fonts-liberation2 \
+      fonts-noto-core \
+      fonts-noto-cjk \
+      fonts-noto-color-emoji \
       ca-certificates \
       cron \
     && rm -rf /var/lib/apt/lists/*
+COPY docker/fonts.conf /etc/fonts/local.conf
+RUN fc-cache -f
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next

@@ -8,6 +8,13 @@ import "dotenv/config";
  * upload/new-version time.
  *
  * Run: npm run backfill:preview
+ *      npm run backfill:preview -- --all
+ *
+ * --all re-converts every Office version, not just the missing ones, and
+ * overwrites its existing preview PDF in place. Use it after a change to
+ * the server's conversion setup (e.g. the fonts installed in the
+ * Dockerfile), since PDFs converted before that keep their old layout.
+ *
  * Requires LIBREOFFICE_PATH (or soffice on PATH) and MinIO reachable.
  */
 import { prisma } from "../lib/prisma";
@@ -15,13 +22,18 @@ import { getFileBuffer, uploadFile } from "../lib/storage";
 import { convertToPdf, isConvertible } from "../lib/officeConvert";
 
 async function main() {
+  const reconvertAll = process.argv.includes("--all");
   const versions = await prisma.documentVersion.findMany({
-    where: { previewPdfPath: null },
+    where: reconvertAll ? {} : { previewPdfPath: null },
     select: { id: true, documentId: true, originalFilename: true, filePath: true, versionNumber: true },
   });
 
   const targets = versions.filter((v) => isConvertible(v.originalFilename));
-  console.log(`Found ${targets.length} version(s) missing a PDF preview.`);
+  console.log(
+    reconvertAll
+      ? `Re-converting ${targets.length} Office version(s).`
+      : `Found ${targets.length} version(s) missing a PDF preview.`
+  );
 
   for (const v of targets) {
     process.stdout.write(`Converting ${v.originalFilename} (doc ${v.documentId} v${v.versionNumber})... `);

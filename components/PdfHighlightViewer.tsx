@@ -48,8 +48,12 @@ const TEXT_LAYER_CSS = `
   position: absolute;
   inset: 0;
   overflow: hidden;
+  text-align: initial;
   line-height: 1;
   opacity: 1;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
   transform-origin: 0 0;
 }
 .ff-pdf-textlayer span, .ff-pdf-textlayer br {
@@ -58,6 +62,10 @@ const TEXT_LAYER_CSS = `
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
+}
+.ff-pdf-textlayer span.markedContent {
+  top: 0;
+  height: 0;
 }
 .ff-pdf-textlayer ::selection {
   background: rgba(37, 99, 235, 0.35);
@@ -372,14 +380,22 @@ export default function PdfHighlightViewer({
       const scale = targetWidth / unscaledViewport.width;
       const viewport = page.getViewport({ scale });
 
+      // Backing store at the screen's real pixel density (CSS size stays the
+      // same), otherwise text renders soft/smeared on HiDPI displays.
+      const pixelRatio = window.devicePixelRatio || 1;
       const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      canvas.width = Math.floor(viewport.width * pixelRatio);
+      canvas.height = Math.floor(viewport.height * pixelRatio);
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
+      canvas.style.display = "block";
       const ctx = canvas.getContext("2d");
       if (!ctx) continue;
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: pixelRatio !== 1 ? [pixelRatio, 0, 0, pixelRatio, 0, 0] : undefined,
+      }).promise;
       if (renderGenRef.current !== myGen) return;
 
       if (pageNum === 1) {
@@ -396,6 +412,11 @@ export default function PdfHighlightViewer({
 
       const textLayerDiv = document.createElement("div");
       textLayerDiv.className = "ff-pdf-textlayer";
+      // pdf.js 3.x sizes and positions every text span (and the layer
+      // itself) as calc(var(--scale-factor) * N) — without this variable
+      // those calcs are invalid, so the selectable text drifts away from
+      // the rendered page and highlights land on the wrong spot.
+      textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale));
       textLayerDiv.style.width = `${viewport.width}px`;
       textLayerDiv.style.height = `${viewport.height}px`;
 
