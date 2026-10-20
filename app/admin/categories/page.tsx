@@ -7,6 +7,7 @@ import Footer from "@/components/Footer";
 import InfoTooltip from "@/components/InfoTooltip";
 import { prisma } from "@/lib/prisma";
 import type { CategoryFormField } from "@/lib/formSchema";
+import CategoryActions from "./CategoryActions";
 
 export default async function CategoriesPage() {
   const user = await getCurrentUser();
@@ -20,6 +21,14 @@ export default async function CategoriesPage() {
   const canManage = can(user.role, "manageCategories");
 
   const categories = await prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" } });
+  const [liveCounts, totalCounts] = canManage
+    ? await Promise.all([
+        prisma.document.groupBy({ by: ["categoryId"], where: { deletedAt: null }, _count: { _all: true } }),
+        prisma.document.groupBy({ by: ["categoryId"], _count: { _all: true } }),
+      ])
+    : [[], []];
+  const countOf = (rows: { categoryId: string; _count: { _all: number } }[], id: string) =>
+    rows.find((r) => r.categoryId === id)?._count._all ?? 0;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
@@ -60,6 +69,11 @@ export default async function CategoriesPage() {
                     {c.description && (
                       <p className="max-w-2xl break-words text-sm text-ff-textMuted">{c.description}</p>
                     )}
+                    {canManage && (
+                      <p className="mt-1 text-xs text-ff-textMuted">
+                        {countOf(liveCounts, c.id)} document{countOf(liveCounts, c.id) === 1 ? "" : "s"}
+                      </p>
+                    )}
                     <p className="mt-1 text-xs text-ff-textMuted">
                       {c.reviewCycleDays === null
                         ? "No review cycle (documents are permanent by default)"
@@ -76,12 +90,17 @@ export default async function CategoriesPage() {
                     </p>
                   </div>
                   {canManage && (
-                    <Link
-                      href={`/admin/categories/${c.id}/edit`}
-                      className="shrink-0 text-sm text-ff-accent hover:underline"
-                    >
-                      Edit
-                    </Link>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <Link href={`/admin/categories/${c.id}/edit`} className="text-sm text-ff-accent hover:underline">
+                        Edit
+                      </Link>
+                      <CategoryActions
+                        category={{ id: c.id, name: c.name }}
+                        docCount={countOf(liveCounts, c.id)}
+                        totalCount={countOf(totalCounts, c.id)}
+                        otherCategories={categories.filter((o) => o.id !== c.id).map((o) => ({ id: o.id, name: o.name }))}
+                      />
+                    </div>
                   )}
                 </div>
               </div>

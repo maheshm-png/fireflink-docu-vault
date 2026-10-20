@@ -25,7 +25,8 @@ export type AuditAction =
   | "reassign_review" | "request_second_opinion" | "undo_approval"
   | "remove_user" | "restore_user" | "reset_password"
   | "upload_review_bypassed" | "change_access" | "share_request" | "team_membership_change" | "team_leadership_change"
-  | "team_role_change" | "global_approver_change" | "sees_all_teams_change" | "team_folder_change" | "everyone_request" | "everyone_request_approved" | "everyone_request_sent_back" | "everyone_request_withdrawn";
+  | "team_role_change" | "global_approver_change" | "sees_all_teams_change" | "team_folder_change" | "everyone_request" | "everyone_request_approved" | "everyone_request_sent_back" | "everyone_request_withdrawn"
+  | "category_move" | "category_delete";
 
 export async function logAudit(params: {
   userId: string;

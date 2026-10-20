@@ -157,6 +157,10 @@ drop policy if exists "categories_update_admin_only" on "Category";
 create policy "categories_update_admin_only" on "Category"
   for update using (current_role_name() in ('manager','superadmin'));
 
+drop policy if exists "categories_delete_admin_only" on "Category";
+create policy "categories_delete_admin_only" on "Category"
+  for delete using (current_role_name() in ('manager','superadmin') and not "isSystem");
+
 -- Announcements: every authenticated user reads active ones (the dashboard
 -- ticker); only manager/superadmin can post, edit, or deactivate one.
 alter table "Announcement" enable row level security;
