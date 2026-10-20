@@ -1,4 +1,5 @@
-import { searchScored } from "./search";
+import { searchScored, withAccessFilter } from "./search";
+import { visibleDocumentIds, type AccessUser } from "./access";
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
@@ -75,10 +76,19 @@ function extractSearchQuery(question: string): string {
  * and the caller always renders the source list alongside the answer so the
  * user can verify it against the real documents.
  */
-export async function prepareAssistant(question: string, history: ChatTurn[] = []): Promise<PreparedAssistant> {
+export async function prepareAssistant(
+  user: AccessUser,
+  question: string,
+  history: ChatTurn[] = []
+): Promise<PreparedAssistant> {
   const searchQuery = extractSearchQuery(question);
-  const results = await searchScored(searchQuery, ['status = "published"'], MAX_SOURCE_DOCS);
-  const hits = results.hits as unknown as Array<{
+  // Only documents this user may see (lib/access.ts): without the access
+  // filter the assistant would quote a restricted team's content to anyone.
+  const results = await searchScored(searchQuery, withAccessFilter(user, ['status = "published"']), MAX_SOURCE_DOCS);
+  // Re-checked against the database as well, so a search index that hasn't
+  // caught up with a visibility change still can't leak an excerpt.
+  const allowed = await visibleDocumentIds(user, (results.hits as { id: string }[]).map((h) => h.id));
+  const hits = (results.hits as { id: string }[]).filter((h) => allowed.has(h.id)) as unknown as Array<{
     id: string;
     title: string;
     categoryName: string;

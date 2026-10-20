@@ -25,6 +25,7 @@ export default function ReviewVersionReference({
   pendingVersion,
   pendingDownloadable,
   compareVersions,
+  previewOnly = false,
 }: {
   documentId: string;
   docType: string;
@@ -32,10 +33,12 @@ export default function ReviewVersionReference({
   // only round so far was rejected) — see page.tsx's hasEverPublished.
   publishedVersion: VersionInfo | null;
   pendingVersion: VersionInfo;
-  // The base "user" role can only ever download the current version — a
-  // still-pending one isn't downloadable to them until it's actually
-  // published (see app/api/documents/[id]/download/route.ts).
+  // Whether this viewer may download the pending version: the live one
+  // follows Preview only, one still under review only its uploader and
+  // reviewers (see app/api/documents/[id]/download/route.ts).
   pendingDownloadable: boolean;
+  // Preview-only document (lib/access.ts downloadsAllowed): no downloads.
+  previewOnly?: boolean;
   // Every version worth comparing — omitted (no toggle shown) when there's
   // only one.
   compareVersions: { versionNumber: number; label: string; hasPreviewPdf: boolean; extractedText: string }[];
@@ -77,13 +80,17 @@ export default function ReviewVersionReference({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-ff-success">Published</p>
               <p className="text-sm font-semibold text-ff-text">{publishedVersion.label}</p>
               <div className="mt-1.5">
-                <DownloadMenu
+{previewOnly ? (
+                  <p className="text-xs text-ff-textMuted">Preview only, no downloads.</p>
+                ) : (
+                                <DownloadMenu
                   documentId={documentId}
                   version={publishedVersion.versionNumber}
                   hasPreviewPdf={Boolean(publishedVersion.previewPdfPath)}
                   docType={docType}
                   variant="link"
                 />
+                )}
               </div>
             </div>
           </div>
@@ -104,6 +111,8 @@ export default function ReviewVersionReference({
                   docType={docType}
                   variant="link"
                 />
+              ) : previewOnly ? (
+                <p className="text-xs text-ff-textMuted">Preview only, no downloads.</p>
               ) : (
                 <p className="text-xs text-ff-textMuted">Available for download once approved.</p>
               )}

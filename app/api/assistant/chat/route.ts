@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     : [];
 
   try {
-    const prepared = await prepareAssistant(message.trim(), cleanHistory);
+    const prepared = await prepareAssistant(user, message.trim(), cleanHistory);
     if (!prepared.matched) {
       return NextResponse.json({ answer: prepared.answer, sources: [] });
     }

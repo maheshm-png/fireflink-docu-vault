@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getFileBuffer } from "@/lib/storage";
 import { extractPptxSlides } from "@/lib/pptxSlides";
 import { prisma } from "@/lib/prisma";
+import { shareLinkUsable } from "@/lib/access";
 
 // GET /api/share/:token/pptx-preview — public counterpart to
 // app/api/documents/[id]/pptx-preview/route.ts (same parsed-slide-JSON
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     where: { token: params.token },
     include: { document: { include: { currentVersion: true } } },
   });
-  if (!share || (share.expiresAt && share.expiresAt.getTime() < Date.now()) || share.document.deletedAt) {
+  if (!share || !shareLinkUsable(share)) {
     return NextResponse.json({ error: "This link is invalid or has expired." }, { status: 404 });
   }
 

@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { indexDocument, removeFromIndex } from "@/lib/search";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { accessInclude, documentAccessWhere, documentRole, documentRoleById, passesTeamGate, teamAllows } from "@/lib/access";
 import { isWithdrawalBeforeReview, purgeDocument } from "@/lib/purgeDocument";
 import { validateMetadataAgainstSchema, type CategoryFormField } from "@/lib/formSchema";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
@@ -13,6 +14,9 @@ import { DUPLICATE_REASON } from "@/lib/duplicates";
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUniqueOrThrow({
     where: { id: params.id },
@@ -23,6 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       currentVersion: true,
       versions: { orderBy: { versionNumber: "desc" }, include: { uploadedBy: true } },
       stalenessFlags: { where: { resolved: false } },
+      ...accessInclude,
     },
   });
 
@@ -50,12 +55,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // canSeeUnpublishedDoc (its own comment has the full reasoning). Everyone
   // else only ever reaches publicly visible ones (also enforced by DB-level RLS).
   const canSeeUnpublished =
-    isPubliclyVisible ||
+    (isPubliclyVisible && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequestsForVisibility.some((r) => r.reviewerId === user.id) ||
     user.role === "superadmin";
   if (!canSeeUnpublished) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // Same rule as the document page: a deleted document is only visible to
+  // roles that manage Deleted Documents.
+  if (document.deletedAt && !can(user.role, "viewDeleted")) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -91,29 +101,63 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUniqueOrThrow({
     where: { id: params.id },
-    include: { category: true },
+    include: {
+      category: true,
+      teamAccess: { select: { teamId: true } },
+      reviewRequests: { select: { reviewerId: true } },
+      globalRequests: { select: { status: true, decidedById: true } },
+    },
   });
 
   if (document.deletedAt) {
     return NextResponse.json({ error: "This document has been deleted" }, { status: 400 });
   }
 
+  // Team documents use the caller's team role (lib/access.ts documentRole).
+  const role = documentRole(user, document);
   const canEdit =
-    can(user.role, "editOwnUpload") &&
+    can(role, "editOwnUpload") &&
     (document.uploadedById === user.id ||
       document.ownerId === user.id ||
-      user.role === "manager" ||
-      user.role === "superadmin");
+      role === "manager" ||
+      role === "superadmin");
   if (!canEdit) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { title, tags, metadata } = await req.json();
+  const { title, tags, metadata, categoryId, extraCategoryIds } = await req.json();
 
-  const schema = (document.category.formSchema as unknown as CategoryFormField[]) ?? [];
+  // Moving to another main category, and "Also show in" extra categories.
+  // Both optional; no new review, since the file doesn't change. The main
+  // category's fields are what the metadata is checked against.
+  let mainCategory = document.category;
+  // Team documents don't use global categories (lib/teamCategory.ts).
+  if (document.visibility === "restricted" && ((categoryId !== undefined && categoryId !== document.categoryId) || (Array.isArray(extraCategoryIds) && extraCategoryIds.length))) {
+    return NextResponse.json({ error: "Team documents don't have a category. Use the team's folders instead." }, { status: 400 });
+  }
+  if (categoryId !== undefined && categoryId !== document.categoryId) {
+    const found = typeof categoryId === "string" ? await prisma.category.findUnique({ where: { id: categoryId } }) : null;
+    if (!found || found.isSystem) return NextResponse.json({ error: "That category doesn't exist." }, { status: 400 });
+    mainCategory = found;
+  }
+  let extras: string[] | null = null;
+  if (extraCategoryIds !== undefined) {
+    if (!Array.isArray(extraCategoryIds) || extraCategoryIds.some((c) => typeof c !== "string")) {
+      return NextResponse.json({ error: "extraCategoryIds must be a list of category ids." }, { status: 400 });
+    }
+    extras = [...new Set(extraCategoryIds as string[])].filter((c) => c !== mainCategory.id);
+    if (extras.length && (await prisma.category.count({ where: { id: { in: extras } } })) !== extras.length) {
+      return NextResponse.json({ error: "One of the extra categories doesn't exist." }, { status: 400 });
+    }
+  }
+
+  const schema = (mainCategory.formSchema as unknown as CategoryFormField[]) ?? [];
   const { valid, missing } = validateMetadataAgainstSchema(schema, metadata ?? {});
   if (!valid) {
     return NextResponse.json(
@@ -135,7 +179,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const wasContentDuplicate = document.duplicateReason === DUPLICATE_REASON.content;
     if (!wasContentDuplicate) {
       const titleMatch = await prisma.document.findFirst({
-        where: { title: { equals: title, mode: "insensitive" }, id: { not: document.id }, deletedAt: null },
+        // Only documents this editor can see, so another team's restricted
+        // document is never named as the match.
+        where: {
+          AND: [{ title: { equals: title, mode: "insensitive" }, id: { not: document.id }, deletedAt: null }, documentAccessWhere(user)],
+        },
       });
       if (titleMatch) {
         duplicateUpdate = { duplicateOfId: titleMatch.id, duplicateReason: DUPLICATE_REASON.title };
@@ -151,6 +199,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       title,
       tags,
       metadata: (metadata ?? {}) as Prisma.InputJsonValue,
+      ...(mainCategory.id !== document.categoryId ? { categoryId: mainCategory.id } : {}),
+      ...(extras !== null
+        ? {
+            extraCategories: {
+              deleteMany: {},
+              ...(extras.length ? { create: extras.map((c) => ({ categoryId: c })) } : {}),
+            },
+          }
+        : {}),
       ...duplicateUpdate,
     },
     include: { category: true, currentVersion: true, uploadedBy: true, duplicateOf: true },
@@ -200,6 +257,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
 
@@ -207,7 +267,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ error: "This document has already been deleted" }, { status: 400 });
   }
 
-  let canDeleteAsManager = can(user.role, "deleteDocument");
+  let canDeleteAsManager = can(await documentRoleById(user, document.id), "deleteDocument");
   if (canDeleteAsManager) {
     const reviewRequests = await prisma.reviewRequest.findMany({
       where: { documentId: document.id },

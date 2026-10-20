@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { passesTeamGate } from "@/lib/access";
 
 // DELETE /api/documents/:id/comments/:commentId — lets a reviewer remove
 // their own inline comment (a typo, wrong selection, changed their mind)
@@ -13,6 +14,9 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.inlineComment.findUnique({
     where: { id: params.commentId },
@@ -42,6 +46,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.inlineComment.findUnique({
     where: { id: params.commentId },

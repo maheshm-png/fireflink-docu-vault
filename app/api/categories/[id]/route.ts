@@ -28,7 +28,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { name, description, reviewCycleDays, formSchema } = await req.json();
   const fields: CategoryFormField[] | undefined = formSchema ? dedupeFieldIds(formSchema) : undefined;
 
-  const before = await prisma.category.findUniqueOrThrow({ where: { id: params.id }, select: { name: true } });
+  const before = await prisma.category.findUniqueOrThrow({ where: { id: params.id }, select: { name: true, isSystem: true } });
+  // The built-in team category (lib/teamCategory.ts) isn't editable.
+  if (before.isSystem) return NextResponse.json({ error: "This built-in category can't be changed." }, { status: 400 });
 
   const category = await prisma.category.update({
     where: { id: params.id },

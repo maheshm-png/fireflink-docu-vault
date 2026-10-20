@@ -6,6 +6,7 @@ import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
+import { documentAccessWhere } from "@/lib/access";
 import { LocalDateTime } from "@/components/LocalDateTime";
 import RestoreButton from "./RestoreButton";
 
@@ -17,14 +18,16 @@ export default async function DeletedDocumentsPage() {
   if (!can(user.role, "viewDeleted")) redirect("/dashboard");
 
   const docs = await prisma.document.findMany({
-    where: { deletedAt: { not: null } },
+    // Team access control (lib/access.ts): another team's restricted
+    // documents stay hidden here too, even once deleted.
+    where: { AND: [{ deletedAt: { not: null } }, documentAccessWhere(user)] },
     include: { category: true, deletedBy: true },
     orderBy: { deletedAt: "desc" },
   });
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Deleted Documents</h1>

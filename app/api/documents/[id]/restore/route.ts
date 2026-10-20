@@ -4,6 +4,7 @@ import { assertCan } from "@/lib/rbac";
 import { indexDocument } from "@/lib/search";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, passesTeamGate } from "@/lib/access";
 
 const RECOVERY_WINDOW_DAYS = 30;
 
@@ -15,9 +16,13 @@ const RECOVERY_WINDOW_DAYS = 30;
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
-    assertCan(user.role, "restoreDocument");
+    // Team documents use the caller's team role (lib/access.ts documentRole).
+    assertCan(await documentRoleById(user, params.id), "restoreDocument");
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }

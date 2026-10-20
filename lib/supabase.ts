@@ -29,8 +29,21 @@ type CurrentUser = {
   name: string;
   role: Role;
   reportsToId: string | null;
-  designation: { name: string } | null;
+  // Display string for the Navbar's profile badge: every team the user is
+  // in, comma-joined. Null when they're in none.
   team: { name: string } | null;
+  // Every team the user belongs to (UserTeam). Drives restricted-document
+  // access, see lib/access.ts.
+  teamIds: string[];
+  // "Sees all teams" (User.seesAllTeams): they can view and comment on every
+  // team's documents.
+  seesAllTeams: boolean;
+  // Leadership view of selected teams only (UserViewTeam).
+  viewTeamIds: string[];
+  // The one Global approver, picked by a superadmin in Settings.
+  isGlobalApprover: boolean;
+  // The user's role in each of their teams (UserTeam.role), keyed by team id.
+  teamRoles: Record<string, "member" | "contributor" | "manager">;
   reportsTo: { name: string } | null;
 } | null;
 
@@ -95,14 +108,34 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
         name: true,
         role: true,
         isActive: true,
+        seesAllTeams: true,
+        viewTeams: { select: { teamId: true } },
+        isGlobalApprover: true,
         reportsToId: true,
-        designation: { select: { name: true } },
-        team: { select: { name: true } },
+        teamMemberships: { select: { role: true, team: { select: { id: true, name: true } } } },
         reportsTo: { select: { name: true } },
       },
     });
     if (profile && profile.isActive) {
-      result = { ...profile, role: profile.role as Role };
+      const { teamMemberships, viewTeams, ...rest } = profile;
+      const teams = teamMemberships.map((m) => m.team).sort((a, b) => a.name.localeCompare(b.name));
+      result = {
+        ...rest,
+        role: profile.role as Role,
+        // "Presales (Manager), BD (Member)": the role in each team, so the
+        // profile menu shows both levels of access at a glance.
+        team: teamMemberships.length
+          ? {
+              name: [...teamMemberships]
+                .sort((a, b) => a.team.name.localeCompare(b.team.name))
+                .map((m) => `${m.team.name} (${m.role.charAt(0).toUpperCase()}${m.role.slice(1)})`)
+                .join(", "),
+            }
+          : null,
+        teamIds: teams.map((t) => t.id),
+        viewTeamIds: viewTeams.map((v) => v.teamId),
+        teamRoles: Object.fromEntries(teamMemberships.map((m) => [m.team.id, m.role])),
+      };
     }
   }
 

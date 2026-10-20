@@ -3,6 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { documentAccessWhere } from "@/lib/access";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { LocalDateTime } from "@/components/LocalDateTime";
@@ -24,7 +25,9 @@ export default async function DocumentActivityPage({
 
   const type = searchParams.type === "download" ? "download" : "view";
 
-  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  // Same team access rule as everywhere else (lib/access.ts): another
+  // team's restricted document is a 404 here too.
+  const document = await prisma.document.findFirst({ where: { AND: [{ id: params.id }, documentAccessWhere(user)] } });
   if (!document) notFound();
 
   const events = await prisma.documentEvent.findMany({
@@ -47,7 +50,7 @@ export default async function DocumentActivityPage({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <div className="max-w-3xl">

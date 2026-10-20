@@ -7,7 +7,7 @@ import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
 
-type Team = { id: string; name: string; userCount: number };
+type Team = { id: string; name: string; userCount: number; restrictedDocCount: number };
 
 export default function TeamManager({ initialTeams }: { initialTeams: Team[] }) {
   const router = useRouter();
@@ -129,10 +129,12 @@ export default function TeamManager({ initialTeams }: { initialTeams: Team[] }) 
               </div>
             ) : (
               <>
-                <div>
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm text-ff-text">{t.name}</span>
-                  <span className="ml-2 text-xs text-ff-textMuted">
+                  <span className="text-xs text-ff-textMuted">
                     {t.userCount} {t.userCount === 1 ? "person" : "people"}
+                    {t.restrictedDocCount > 0 &&
+                      `, ${t.restrictedDocCount} restricted document${t.restrictedDocCount === 1 ? "" : "s"}`}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -169,6 +171,9 @@ export default function TeamManager({ initialTeams }: { initialTeams: Team[] }) 
           confirmingId
             ? (() => {
                 const t = initialTeams.find((x) => x.id === confirmingId);
+                if (t && t.restrictedDocCount > 0) {
+                  return `This team guards ${t.restrictedDocCount} restricted document${t.restrictedDocCount === 1 ? "" : "s"}, so it can't be deleted yet. Move those documents to another team or make them visible to everyone first.`;
+                }
                 return t && t.userCount > 0
                   ? `${t.userCount} ${t.userCount === 1 ? "person" : "people"} currently ${t.userCount === 1 ? "is" : "are"} on this team. This can't be undone.`
                   : "This can't be undone.";

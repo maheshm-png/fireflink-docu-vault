@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { passesTeamGate } from "@/lib/access";
 
 // PATCH /api/documents/:id/feedback/:feedbackId/replies/:replyId — { comment }.
 // The reply's own author ONLY, same restriction as editing a feedback
@@ -14,6 +15,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.feedbackReply.findUnique({ where: { id: params.replyId } });
   if (!existing || existing.feedbackId !== params.feedbackId) {

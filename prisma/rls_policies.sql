@@ -21,15 +21,46 @@ create or replace function current_role_name() returns text as $$
   select role::text from "User" where id = auth.uid()::text
 $$ language sql stable set search_path = public;
 
+-- Team access control (lib/access.ts is the app-side copy of this rule):
+-- superadmins and people with "Sees all teams" see every restricted
+-- document; everyone else only those shared with one of their teams.
+-- security definer so the lookups work whatever RLS says about UserTeam/
+-- Team for the calling role; search_path pinned for the same reason as
+-- current_role_name().
+create or replace function current_user_sees_all_restricted() returns boolean as $$
+  select exists (
+    select 1 from "User" where id = auth.uid()::text and (role = 'superadmin' or "seesAllTeams")
+  )
+$$ language sql stable security definer set search_path = public;
+
+create or replace function team_allows_document(doc_id text) returns boolean as $$
+  select current_user_sees_all_restricted()
+      or exists (
+        select 1 from "DocumentTeamAccess" dta
+        join "UserTeam" ut on ut."teamId" = dta."teamId"
+        where dta."documentId" = doc_id and ut."userId" = auth.uid()::text
+      )
+      -- Leadership view of selected teams (UserViewTeam).
+      or exists (
+        select 1 from "DocumentTeamAccess" dta
+        join "UserViewTeam" uv on uv."teamId" = dta."teamId"
+        where dta."documentId" = doc_id and uv."userId" = auth.uid()::text
+      )
+$$ language sql stable security definer set search_path = public;
+
 -- Documents: everyone sees published docs; only uploader/owner/manager/
--- superadmin see pending/rejected ones.
+-- superadmin see pending/rejected ones. On top of that, a restricted
+-- document is hidden from anyone outside its teams, except its own
+-- uploader/owner (who always keep access to their work).
 drop policy if exists "view_published_docs" on "Document";
 create policy "view_published_docs" on "Document"
   for select using (
-    status = 'published'
-    or "uploadedById" = auth.uid()::text
+    "uploadedById" = auth.uid()::text
     or "ownerId" = auth.uid()::text
-    or current_role_name() in ('manager','superadmin')
+    or (
+      (status = 'published' or current_role_name() in ('manager','superadmin'))
+      and (visibility = 'org' or team_allows_document(id))
+    )
   );
 
 drop policy if exists "insert_docs_uploaders" on "Document";
@@ -389,3 +420,26 @@ create policy "saved_filters_own" on "SavedFilter"
 -- by anyone but `prisma migrate deploy` itself over the direct/service-role
 -- connection, so enabling RLS with nothing else denies all PostgREST access.
 alter table "_prisma_migrations" enable row level security;
+
+-- Team membership and per-document team grants: never read or written
+-- through PostgREST. The app manages both over its own service-role
+-- connection (app/api/admin/users, app/api/documents/[id]/access), and the
+-- security-definer helpers above read them for the Document policy.
+-- Enabling RLS with no policy denies all PostgREST access, same as
+-- PasswordResetOtp.
+alter table "UserTeam" enable row level security;
+alter table "DocumentTeamAccess" enable row level security;
+
+-- "Request for Everyone" (lib/access.ts): managed only by the app over its
+-- own connection. RLS with no policy denies all PostgREST access.
+alter table "GlobalPublishRequest" enable row level security;
+
+-- Team folders (Home > My teams): managed only by the app over its own
+-- connection. RLS with no policy denies all PostgREST access.
+alter table "TeamFolder" enable row level security;
+
+-- Extra categories ("Also show in"): app-managed only, no PostgREST access.
+alter table "DocumentCategory" enable row level security;
+
+-- Leadership view of selected teams: app-managed only, no PostgREST access.
+alter table "UserViewTeam" enable row level security;

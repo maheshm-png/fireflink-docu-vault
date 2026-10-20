@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { documentRole, downloadsAllowed, passesTeamGate, sharingAllowed, stakeSelect } from "@/lib/access";
 
 const MIN_EXPIRY_HOURS = 1;
 const MAX_EXPIRY_HOURS = 24 * 90; // 90 days
@@ -39,12 +40,13 @@ async function assertCanManageShare(documentId: string) {
       externalUrl: true,
       status: true,
       shareEnabled: true,
+      visibility: true,
       currentVersionId: true,
       revokedAt: true,
       versions: { select: { id: true, versionNumber: true, uploadedAt: true } },
     },
   });
-  if (!document || document.deletedAt || !document.shareEnabled) return false;
+  if (!document || document.deletedAt || !document.shareEnabled || !sharingAllowed(document)) return false;
   if (document.externalUrl) return document.status === "published";
   if (!document.currentVersionId) return false;
   const reviewRequests = await prisma.reviewRequest.findMany({
@@ -58,21 +60,30 @@ async function assertCanManageShare(documentId: string) {
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!(await assertCanManageShare(params.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const share = await prisma.shareLink.findUnique({ where: { documentId: params.id } });
-  if (!share) return NextResponse.json({ share: null });
+  const doc = await prisma.document.findUniqueOrThrow({ where: { id: params.id }, select: { visibility: true, downloadable: true } });
+  // Tells ShareModal whether to offer "View & download" at all.
+  const downloadAllowed = downloadsAllowed(doc);
+  if (!share) return NextResponse.json({ share: null, downloadAllowed });
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   return NextResponse.json({
     share: {
       url: `${appUrl}/share/${share.token}`,
-      accessLevel: share.accessLevel,
       expiresAt: share.expiresAt,
+      // A preview-only document's link behaves as view only, whatever it
+      // was created as.
+      accessLevel: downloadAllowed ? share.accessLevel : "view",
       expired: share.expiresAt !== null && share.expiresAt.getTime() < Date.now(),
     },
+    downloadAllowed,
   });
 }
 
@@ -85,6 +96,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!(await assertCanManageShare(params.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -108,6 +122,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
+  if (accessLevel === "view_download" && !downloadsAllowed(document)) {
+    return NextResponse.json({ error: "This document is preview only, so its link can only allow viewing." }, { status: 400 });
+  }
 
   const share = await prisma.shareLink.upsert({
     where: { documentId: params.id },
@@ -132,6 +149,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!(await assertCanManageShare(params.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -159,16 +179,20 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUnique({
     where: { id: params.id },
-    select: { deletedAt: true, uploadedById: true, title: true },
+    select: { deletedAt: true, title: true, visibility: true, teamAccess: { select: { teamId: true } }, ...stakeSelect },
   });
   if (!document || document.deletedAt) {
     return NextResponse.json({ error: "Document not found." }, { status: 404 });
   }
 
-  const canManage = user.role === "manager" || user.role === "superadmin" || document.uploadedById === user.id;
+  const role = documentRole(user, document);
+  const canManage = role === "manager" || role === "superadmin" || document.uploadedById === user.id;
   if (!canManage) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -176,6 +200,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { shareEnabled } = await req.json();
   if (typeof shareEnabled !== "boolean") {
     return NextResponse.json({ error: "shareEnabled must be true or false." }, { status: 400 });
+  }
+
+  // Team documents are never shared outside the company (lib/access.ts).
+  if (shareEnabled && !sharingAllowed(document)) {
+    return NextResponse.json({ error: "Team documents can't be shared outside the company." }, { status: 400 });
   }
 
   await prisma.document.update({ where: { id: params.id }, data: { shareEnabled } });

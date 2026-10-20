@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPreviewUrl, getFileBuffer } from "@/lib/storage";
 import { prisma } from "@/lib/prisma";
+import { shareLinkUsable } from "@/lib/access";
 
 // GET /api/share/:token/view?format=pdf|original — public, no auth. Used by
 // app/share/[token]/page.tsx's inline <iframe>/<video>. Deliberately
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     where: { token: params.token },
     include: { document: { include: { currentVersion: true } } },
   });
-  if (!share || (share.expiresAt && share.expiresAt.getTime() < Date.now()) || share.document.deletedAt) {
+  if (!share || !shareLinkUsable(share)) {
     return NextResponse.json({ error: "This link is invalid or has expired." }, { status: 404 });
   }
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Sparkles } from "lucide-react";
 import { slugifyFieldId, type CategoryFormField, type CategoryFieldType } from "@/lib/formSchema";
 import AlertModal from "@/components/AlertModal";
+import InfoTooltip from "@/components/InfoTooltip";
 
 const FIELD_TYPES: { value: CategoryFieldType; label: string }[] = [
   { value: "text", label: "Short text" },
@@ -187,12 +188,8 @@ export default function CategoryFormBuilder({
                 />
                 None
               </label>
+              <InfoTooltip align="right" text="None means documents uploaded into this category are marked permanent by default and never flagged for re-review." />
             </div>
-            {reviewCycleDays === null && (
-              <p className="mt-1 text-xs text-ff-textMuted">
-                Documents uploaded into this category are marked permanent by default and never flagged for re-review.
-              </p>
-            )}
           </div>
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs text-ff-textMuted">Description (optional)</label>
@@ -207,7 +204,10 @@ export default function CategoryFormBuilder({
 
       <div className="rounded-ff border border-ff-border bg-white p-4 shadow-ff">
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-base font-bold text-ff-text">Upload form for this category</h2>
+          <h2 className="flex items-center gap-1.5 text-base font-bold text-ff-text">
+            Upload form for this category
+            <InfoTooltip text="These questions appear whenever someone uploads a document, PPT, or video into this category. Required fields must be answered before the upload can be submitted." />
+          </h2>
           <button
             type="button"
             onClick={() => addField()}
@@ -216,10 +216,7 @@ export default function CategoryFormBuilder({
             <Plus className="h-3.5 w-3.5" /> Add Field
           </button>
         </div>
-        <p className="mb-4 text-xs text-ff-textMuted">
-          These questions appear whenever someone uploads a document, PPT, or video into this
-          category. Required fields must be answered before the upload can be submitted.
-        </p>
+        <div className="mb-4" />
 
         {reusableSuggestions.length > 0 && (
           <div className="mb-4 rounded-ff border border-ff-border bg-ff-lavender/40 p-3">

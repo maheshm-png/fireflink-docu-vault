@@ -5,6 +5,7 @@ import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
+import { documentAccessWhere, seesAllRestricted } from "@/lib/access";
 import { LocalDateTime } from "@/components/LocalDateTime";
 
 // AuditLog.action is a raw snake_case identifier ("post_announcement") —
@@ -28,9 +29,25 @@ export default async function AuditLogPage() {
     take: 200,
   });
 
+  // Every action stays listed (who did what, when), but the title of a
+  // restricted document this viewer can't see is masked and not linked
+  // (lib/access.ts). AuditLog.documentId has no FK, so purged documents
+  // simply aren't found here and keep their snapshotted title as before.
+  const loggedIds = [...new Set(entries.map((e) => e.documentId).filter((id): id is string => id !== null))];
+  const hiddenIds = new Set(
+    seesAllRestricted(user) || loggedIds.length === 0
+      ? []
+      : (
+          await prisma.document.findMany({
+            where: { id: { in: loggedIds }, NOT: documentAccessWhere(user) },
+            select: { id: true },
+          })
+        ).map((d) => d.id)
+  );
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8">
         <h1 className="mb-6 text-2xl font-bold tracking-tight text-ff-text">Audit Log</h1>
@@ -52,7 +69,9 @@ export default async function AuditLogPage() {
                   <td className="px-4 py-2">{e.user.name}</td>
                   <td className="px-4 py-2 text-ff-textMuted">{formatAction(e.action)}</td>
                   <td className="px-4 py-2 text-ff-textMuted">
-                    {e.documentId ? (
+                    {e.documentId && hiddenIds.has(e.documentId) ? (
+                      <span className="italic">Restricted document</span>
+                    ) : e.documentId ? (
                       <Link href={`/dashboard/documents/${e.documentId}`} className="text-ff-accent hover:underline">
                         {e.documentTitle ?? e.documentId}
                       </Link>

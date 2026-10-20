@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { getPreviewUrl, getFileBuffer } from "@/lib/storage";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { accessInclude, teamAllows, involvedInReview } from "@/lib/access";
 
 // GET /api/documents/:id/preview?version=3 — same access rules as
 // /download (see that route), but resolves an inline-disposition presigned
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const [document, reviewRequests] = await Promise.all([
     prisma.document.findUniqueOrThrow({
       where: { id: params.id },
-      include: { currentVersion: true, versions: true },
+      include: { currentVersion: true, versions: true, ...accessInclude },
     }),
     prisma.reviewRequest.findMany({
       where: { documentId: params.id },
@@ -54,15 +55,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // visible (see app/dashboard/revoked/page.tsx), just not downloadable by
   // anyone who isn't already covered below.
   const hasEverPublished = document.currentVersionId !== null && approvedVersionIds.has(document.currentVersionId);
-  const isPubliclyVisible = hasEverPublished && document.status !== "archived";
+  const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
 
   // Uploader/owner/an assigned reviewer (any round)/superadmin, same
   // narrower rule as app/dashboard/documents/[id]/page.tsx's
   // canSeeUnpublishedDoc — a manager with no assignment on this document
   // can't preview its still-pending content early either.
   const canAccessUnpublished =
-    isPubliclyVisible ||
-    document.status === "revoked" ||
+    (isPubliclyVisible && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequests.some((r) => r.reviewerId === user.id) ||
@@ -78,11 +78,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
-  // The base view-only "user" role can preview any version that actually
-  // passed review at some point (an old published one, or whatever's
-  // current), never one that's still pending or was rejected — same rule
-  // /download enforces, matching what the Versions tab even shows them.
-  if (user.role === "user" && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
+  // Anyone not working on this review (lib/access.ts involvedInReview) can
+  // preview only versions that passed review at some point (an old published
+  // one, or whatever's current), never one still pending or rejected. The
+  // uploader and its reviewers can open the version under review, whatever
+  // their org role (a team Manager is often an org User).
+  if (!involvedInReview(user, document, reviewRequests) && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
     return NextResponse.json({ error: "Only published versions are available to preview." }, { status: 403 });
   }
 

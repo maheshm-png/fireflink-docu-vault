@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { documentAccessWhere, type AccessUser } from "./access";
 
 /** Bulk-creates in-app notifications — see lib/notify.ts, which calls this
  * alongside the Google Chat send for the same event so both channels stay
@@ -8,7 +9,7 @@ import { prisma } from "./prisma";
 export async function createNotifications(
   items: {
     userId: string;
-    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied";
+    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied" | "share_requested" | "leadership_comment" | "everyone_requested" | "everyone_approved" | "everyone_sent_back";
     title: string;
     body?: string;
     documentId?: string;
@@ -24,14 +25,22 @@ export async function createNotifications(
 }
 
 /** Drops notifications whose document has since been deleted (soft-deleted
- * or purged). Notification has no FK to Document, so without this a
- * deleted document kept showing in the bell, the "New" ticker and the NEW
- * badges. Filtered at read time rather than deleting rows, so restoring a
- * document within its retention window brings its notifications back. */
-export async function withoutDeletedDocuments<T extends { documentId: string | null }>(items: T[]): Promise<T[]> {
+ * or purged), or that this user can no longer see (restricted to teams
+ * they're not in, after the notification went out — see lib/access.ts).
+ * Notification has no FK to Document, so without this a deleted or
+ * restricted document kept showing its title in the bell, the "New" ticker
+ * and the NEW badges. Filtered at read time rather than deleting rows, so
+ * restoring a document (or regaining access) brings its notifications back. */
+export async function withoutDeletedDocuments<T extends { documentId: string | null }>(
+  user: AccessUser,
+  items: T[]
+): Promise<T[]> {
   const ids = [...new Set(items.map((n) => n.documentId).filter((id): id is string => id !== null))];
   if (ids.length === 0) return items;
-  const live = await prisma.document.findMany({ where: { id: { in: ids }, deletedAt: null }, select: { id: true } });
+  const live = await prisma.document.findMany({
+    where: { AND: [{ id: { in: ids }, deletedAt: null }, documentAccessWhere(user)] },
+    select: { id: true },
+  });
   const liveIds = new Set(live.map((d) => d.id));
   return items.filter((n) => n.documentId === null || liveIds.has(n.documentId));
 }

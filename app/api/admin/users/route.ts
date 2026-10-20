@@ -64,9 +64,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }
 
-  const { email, name, role, password } = await req.json();
+  const { email, name, role, password, teams, seesAllTeams, viewTeamIds } = await req.json();
+  const viewTeams =
+    !seesAllTeams && Array.isArray(viewTeamIds) ? [...new Set((viewTeamIds as unknown[]).filter((t): t is string => typeof t === "string"))] : [];
+  if (viewTeams.length && (await prisma.team.count({ where: { id: { in: viewTeams } } })) !== viewTeams.length) {
+    return NextResponse.json({ error: "One of the leadership view teams doesn't exist." }, { status: 400 });
+  }
   if (!email || !name || !role) {
     return NextResponse.json({ error: "email, name, and role are required" }, { status: 400 });
+  }
+  if (!["manager", "contributor", "user"].includes(role)) {
+    return NextResponse.json({ error: "Org role must be Manager, Contributor or User." }, { status: 400 });
+  }
+  // Optional teams with a role in each: [{ teamId, role }]. Checked before any
+  // account is created, so a bad pick never leaves a half-made user.
+  // Everyone in a team can upload to it; view only is for leadership.
+  const TEAM_ROLES = ["contributor", "manager"];
+  let teamPicks: { teamId: string; role: "contributor" | "manager" }[] = [];
+  if (teams !== undefined) {
+    if (
+      !Array.isArray(teams) ||
+      teams.some((t) => !t || typeof t.teamId !== "string" || !TEAM_ROLES.includes(t.role))
+    ) {
+      return NextResponse.json({ error: "Each team needs a team and a team role (Contributor or Manager)." }, { status: 400 });
+    }
+    teamPicks = [...new Map((teams as typeof teamPicks).map((t) => [t.teamId, t])).values()];
+    if (teamPicks.length && (await prisma.team.count({ where: { id: { in: teamPicks.map((t) => t.teamId) } } })) !== teamPicks.length) {
+      return NextResponse.json({ error: "One of those teams doesn't exist." }, { status: 400 });
+    }
   }
   if (password !== undefined && (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH)) {
     return NextResponse.json(
@@ -112,8 +137,15 @@ export async function POST(req: NextRequest) {
     }
     const reactivated = await prisma.user.update({
       where: { id: existing.id },
-      data: { name, role, isActive: true },
+      data: { name, role, isActive: true, seesAllTeams: seesAllTeams === true },
     });
+    // Teams picked now replace whatever they had before they were removed.
+    if (teams !== undefined) {
+      await prisma.$transaction([
+        prisma.userTeam.deleteMany({ where: { userId: existing.id } }),
+        prisma.userTeam.createMany({ data: teamPicks.map((t) => ({ userId: existing.id, teamId: t.teamId, role: t.role })) }),
+      ]);
+    }
     await logAudit({ userId: user.id, action: "restore_user", documentId: undefined });
     return NextResponse.json({ user: reactivated }, { status: 200 });
   }
@@ -175,6 +207,9 @@ export async function POST(req: NextRequest) {
       name,
       role,
       passwordHash: "", // Supabase Auth owns the credential; not stored here
+      seesAllTeams: seesAllTeams === true,
+      ...(viewTeams.length ? { viewTeams: { create: viewTeams.map((teamId) => ({ teamId })) } } : {}),
+      ...(teamPicks.length ? { teamMemberships: { create: teamPicks.map((t) => ({ teamId: t.teamId, role: t.role })) } } : {}),
     },
   });
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDownloadUrl } from "@/lib/storage";
 import { computeRoundAttempts } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
 
 // Same filename convention as app/api/documents/[id]/download/route.ts's
 // own buildDownloadFilename — kept as its own small copy rather than a
@@ -28,10 +29,12 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       },
     },
   });
-  if (!share || (share.expiresAt && share.expiresAt.getTime() < Date.now()) || share.document.deletedAt) {
+  if (!share || !shareLinkUsable(share)) {
     return NextResponse.json({ error: "This link is invalid or has expired." }, { status: 404 });
   }
-  if (share.accessLevel !== "view_download") {
+  // A preview-only document overrides a link created as "View & download"
+  // (lib/access.ts downloadsAllowed).
+  if (share.accessLevel !== "view_download" || !downloadsAllowed(share.document)) {
     return NextResponse.json({ error: "This link only allows viewing, not downloading." }, { status: 403 });
   }
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Share2 } from "lucide-react";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
+import InfoTooltip from "@/components/InfoTooltip";
 
 // Manage-tab sharing control — a manager or this document's own uploader
 // can turn "anyone with the link" sharing on/off any time after publish,
@@ -16,6 +17,8 @@ import AlertModal from "@/components/AlertModal";
 // here by hiding the Share button entirely wherever it's rendered
 // (app/dashboard/documents/[id]/page.tsx), since there's nothing left to
 // manage from there once sharing is off.
+// Only shown for documents for Everyone: team documents can't be shared
+// outside the company (lib/access.ts sharingAllowed).
 export default function ShareSettings({
   documentId,
   initialShareEnabled,
@@ -59,10 +62,9 @@ export default function ShareSettings({
             <Share2 className="h-4 w-4" aria-hidden />
           </span>
           <div>
-            <p className="text-sm font-semibold text-ff-text">Allow Sharing</p>
-            <p className="text-xs text-ff-textMuted">
-              Lets anyone who can view this document create and manage a public &quot;anyone with the link&quot;
-              share. Turn off to hide the Share button and immediately deactivate any link already issued.
+            <p className="flex items-center gap-1 text-sm font-semibold text-ff-text">
+              Allow Sharing
+              <InfoTooltip text="Lets anyone who can view this document create an 'anyone with the link' share for customers. Turning it off hides Share and stops any link already sent." />
             </p>
           </div>
         </div>

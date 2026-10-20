@@ -49,9 +49,10 @@ export default function SettingsForm({
 
       <div className="mb-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs text-ff-textMuted">
+          <div className="mb-1 flex items-center gap-1 text-xs text-ff-textMuted">
             Deleted documents: permanently purge after (days)
-          </label>
+            <InfoTooltip text="How long a deleted document stays recoverable (see Deleted Documents) before it's removed for good." />
+          </div>
           <input
             type="number"
             min={1}
@@ -60,14 +61,12 @@ export default function SettingsForm({
             onChange={(e) => setDeletedDocRetentionDays(parseInt(e.target.value, 10) || 1)}
             className="w-full rounded-ff border border-ff-border px-3 py-2 text-sm"
           />
-          <p className="mt-1 text-xs text-ff-textMuted">
-            How long a deleted document stays recoverable (see Deleted Documents) before it&apos;s removed for good.
-          </p>
         </div>
         <div>
-          <label className="mb-1 block text-xs text-ff-textMuted">
+          <div className="mb-1 flex items-center gap-1 text-xs text-ff-textMuted">
             Old file versions: purge superseded versions after (days)
-          </label>
+            <InfoTooltip align="right" text="Only older, replaced versions are purged. The current version is never removed." />
+          </div>
           <input
             type="number"
             min={1}
@@ -76,9 +75,6 @@ export default function SettingsForm({
             onChange={(e) => setOldVersionRetentionDays(parseInt(e.target.value, 10) || 1)}
             className="w-full rounded-ff border border-ff-border px-3 py-2 text-sm"
           />
-          <p className="mt-1 text-xs text-ff-textMuted">
-            Only older, replaced versions are purged. The current version is never removed.
-          </p>
         </div>
       </div>
 

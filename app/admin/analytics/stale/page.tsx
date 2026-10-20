@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { documentAccessWhere } from "@/lib/access";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
@@ -25,7 +26,7 @@ export default async function StaleDocumentsPage({
   if (!can(user.role, "viewAuditLog")) redirect("/dashboard");
 
   const docs = await prisma.document.findMany({
-    where: { deletedAt: null, stalenessFlags: { some: { resolved: false } } },
+    where: { AND: [{ deletedAt: null, stalenessFlags: { some: { resolved: false } } }, documentAccessWhere(user)] },
     include: {
       category: true,
       uploadedBy: true,
@@ -52,7 +53,7 @@ export default async function StaleDocumentsPage({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <div className="mb-1 flex items-center justify-between gap-3">

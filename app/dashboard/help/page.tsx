@@ -1,77 +1,97 @@
 import { redirect } from "next/navigation";
-import { UsersRound, Upload, Eye, CheckCircle2, XCircle, ShieldCheck } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
-import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { ROLE_LABELS } from "@/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { ORG_LEVEL, TEAM_LEVEL, TEAM_ROLE_LABEL } from "@/lib/roleCopy";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { WorkflowChart, type FlowNode } from "./WorkflowChart";
 
-type RoleGuide = {
-  icon: typeof UsersRound;
-  tagline: string;
-  canDo: string[];
-  cannotDo?: string[];
+// What THIS person can do, in plain sentences, built from their org role,
+// their role in each team, and the Global approver / Sees all teams flags.
+// Prose for humans: the rules live in lib/rbac.ts and lib/access.ts; if those
+// change, update this too.
+type AccessFacts = {
+  role: string;
+  isGlobalApprover: boolean;
+  seesAllTeams: boolean;
+  viewTeamNames: string[];
+  teams: { name: string; role: "member" | "contributor" | "manager" }[];
 };
 
-// Kept as plain data next to the page that renders it, not merged into
-// lib/rbac.ts's PERMISSIONS matrix — this is prose for humans to read, not
-// a check any code path evaluates, and several of the things described
-// here (who can share a document, who can triage feedback on it) are
-// document-ownership rules rather than a role check, so they don't have a
-// PERMISSIONS entry to summarize in the first place. Deliberately has no
-// entry for "superadmin" — this page answers "what can I do with MY
-// account," and a superadmin's own account management isn't something this
-// page documents. Cross-checked against lib/rbac.ts, the share/feedback API
-// routes, and app/api/documents/[id]/route.ts's own canEdit/delete checks
-// at the time this was written — if those rules change, update this too,
-// same as ROLE_DESCRIPTIONS.
-const ROLE_GUIDES: Partial<Record<Role, RoleGuide>> = {
-  manager: {
-    icon: UsersRound,
-    tagline: "Owns the review pipeline and day-to-day document lifecycle.",
-    canDo: [
-      "Upload documents and edit their own uploads",
-      "Approve or reject a review assigned to them, with required comments on a rejection",
-      "On approval: decide whether to announce the publish to everyone, allow feedback, and allow public sharing, all three are required choices, none can be skipped",
-      "Reassign a review to another manager, or bring in additional managers for a second/third opinion",
-      "Delete a document outright, revoke a published one back into review, and archive/restore/extend/mark-permanent",
-      "View and restore Deleted documents",
-      "Manage Categories, Settings, and Announcements",
-      "View the Audit Log and Analytics dashboard",
-      "Turn a document's sharing or feedback setting on/off later from its Manage tab, and triage (accept/close, with a reply note) feedback left on any document",
-    ],
-    cannotDo: ["Manage users, designations, or teams"],
-  },
-  contributor: {
-    icon: Upload,
-    tagline: "Uploads and maintains their own documents.",
-    canDo: [
-      "Upload a document for review, into any category, to any manager",
-      "Upload a new version of an existing document (goes through review again)",
-      "Edit their own uploads (title, tags, category, details)",
-      "Delete their own upload while it's still pending review (not once it's published, that needs a manager)",
-      "View, download, and search published documents, same as everyone",
-      "On a document they uploaded: turn its sharing or feedback setting on/off, and triage feedback left on it",
-      "Leave feedback on any document that has feedback enabled, and create a share link for any document that has sharing enabled",
-    ],
-    cannotDo: ["Approve or reject reviews, or delete/revoke/archive a published document"],
-  },
-  user: {
-    icon: Eye,
-    tagline: "View-only access to everything published.",
-    canDo: [
-      "View, download, and search every published document",
-      "Leave feedback on a document that has feedback enabled",
-      "Create and manage a public share link for a document that has sharing enabled, sharing isn't restricted to uploaders/managers, any signed-in user who can view the document can share it",
-      "See in-app notifications and the team-wide Announcements ticker",
-      "Reset their own password (Forgot Password on the sign-in screen) without anyone's help",
-    ],
-    cannotDo: ["Upload documents, or take any review/admin action"],
-  },
-};
+function whatYouCanDo(u: AccessFacts): { heading: string; items: string[] }[] {
+  const groups: { heading: string; items: string[] }[] = [];
+  const everyone = [
+    "View, search and download published documents",
+    "Share documents with customers by link, when sharing is on for that document",
+    "Leave feedback, when feedback is on for that document",
+  ];
+  if (u.role === "contributor" || u.role === "manager" || u.role === "superadmin") {
+    everyone.push(
+      u.role === "manager"
+        ? "Upload documents for everyone. Send them to a reviewer, or publish your own straight away with No review needed"
+        : "Upload documents for everyone. A manager reviews each one before anyone else sees it",
+      "Edit your own uploads and upload new versions of them"
+    );
+  }
+  if (u.role === "manager") {
+    everyone.push(
+      "Approve or reject uploads sent to you, with comments when you reject",
+      "Archive, restore or delete documents you uploaded or reviewed"
+    );
+  }
+  if (u.isGlobalApprover && u.role === "manager") {
+    everyone.push(
+      "Review uploads from any team when you're picked as their reviewer (you're the Global approver). You see only the team documents assigned to you",
+      "Decide when a team asks for one of its documents to be visible to everyone"
+    );
+  }
+  if (u.role === "superadmin") {
+    everyone.push(
+      "Add and manage people, teams, categories and settings",
+      "See every team's documents, and archive or restore any document"
+    );
+  }
+  groups.push({ heading: "Documents for everyone", items: everyone });
+
+  for (const t of u.teams) {
+    const items = [`View, download and search ${t.name}'s documents`];
+    if (t.role === "contributor" || t.role === "manager") {
+      items.push(
+        t.role === "manager"
+          ? `Upload for ${t.name}. Send to a reviewer, or publish straight away with No review needed`
+          : `Upload for ${t.name}. A ${t.name} manager reviews it`,
+        "Pick a folder for your upload"
+      );
+    }
+    if (t.role === "manager") {
+      items.push(
+        `Approve or reject ${t.name} uploads sent to you`,
+        `Create, rename and delete ${t.name}'s folders, and move documents between them`,
+        `Ask for a ${t.name} document to be visible to everyone`
+      );
+    }
+    groups.push({ heading: `${t.name} (${t.role.charAt(0).toUpperCase()}${t.role.slice(1)})`, items });
+  }
+
+  const leaderView = u.seesAllTeams
+    ? "View, download and comment on every team's documents"
+    : u.viewTeamNames.length
+      ? `View, download and comment on ${u.viewTeamNames.join(", ")} documents`
+      : null;
+  const otherTeams = [
+    ...(leaderView ? [leaderView] : []),
+    ...(u.role === "contributor" || u.role === "manager"
+      ? ["Upload into a team you're not in. Its manager reviews it, and you see only your own upload there"]
+      : []),
+  ];
+  if (otherTeams.length) groups.push({ heading: "Other teams", items: otherTeams });
+  return groups;
+}
 
 // RACI (Responsible/Accountable/Consulted/Informed) per stage, cross-checked
-// against the same sources as ROLE_GUIDES above — a field is left out of a
+// against the same sources as the access tables above — a field is left out of a
 // given stage's `raci` object where it genuinely doesn't apply (e.g. no one
 // is "consulted" before a self-service password reset) rather than filled
 // with a placeholder.
@@ -79,58 +99,148 @@ const PUBLISH_FLOW: FlowNode[][] = [
   [
     {
       label: "Upload",
-      note: "Contributor, Manager, or Superadmin",
+      note: "Contributor or Manager",
       tone: "start",
       detail:
-        "The uploader picks a category, fills in that category's fields, attaches the file, and chooses which Manager should review it. The document lands directly in Pending Review, nothing is visible to anyone else yet.",
+        "Pick a category, fill in its fields, attach the file, choose Everyone, and pick the Manager who should review it. Nobody else sees it yet.",
       raci: { responsible: "Uploader", accountable: "Uploader", informed: "The Manager chosen as reviewer" },
     },
   ],
   [
     {
-      label: "Pending Review",
-      note: "Sent to the chosen reviewer",
+      label: "In review",
+      note: "Waiting on the reviewer",
       tone: "neutral",
       detail:
-        "The document sits with the assigned Manager until they act on it. The Manager can loop in one or more additional Managers for a second opinion before deciding.",
-      raci: {
-        responsible: "Assigned Manager",
-        accountable: "Assigned Manager",
-        consulted: "Any additional Managers brought in",
-        informed: "Uploader",
-      },
+        "It shows in the reviewer's My Work > Waiting on me. The reviewer can bring in more Managers for a second opinion, or hand it to another Manager.",
+      raci: { responsible: "Reviewing Manager", accountable: "Reviewing Manager", consulted: "Managers brought in", informed: "Uploader" },
     },
   ],
   [
     {
       label: "Approved",
-      note: "Manager publishes it",
+      note: "Published for everyone",
       tone: "success",
       detail:
-        "The reviewing Manager approves and, in the same step, must decide whether to announce the publish to everyone, allow feedback, and allow public sharing. All three choices are required, none can be skipped.",
-      raci: {
-        responsible: "Reviewing Manager",
-        accountable: "Reviewing Manager",
-        informed: "Uploader, and everyone else if the publish is announced",
-      },
+        "On approval the reviewer confirms downloads, customer share links, feedback and notifications. One click fills in the usual answers. Everyone in FireFlink can now find it on Home.",
+      raci: { responsible: "Reviewing Manager", accountable: "Reviewing Manager", informed: "Uploader, and everyone if notified" },
     },
     {
       label: "Rejected",
-      note: "Comments required; uploader fixes and resubmits",
+      note: "Comments required",
       tone: "danger",
       detail:
-        "The reviewing Manager rejects with required comments on what needs to change. The document goes back to the uploader, who edits it and resubmits for another round of review.",
+        "The reviewer says what needs to change. The uploader uploads a new version, which starts the next review round with the same reviewer.",
       raci: { responsible: "Reviewing Manager", accountable: "Reviewing Manager", informed: "Uploader" },
     },
   ],
   [
     {
-      label: "Published",
-      note: "Visible to everyone",
+      label: "Manager shortcut",
+      note: "No review needed",
+      tone: "warn",
+      detail:
+        "A Manager uploading their own document may tick No review needed. It publishes straight away and carries a Review Bypassed label, so everyone can tell. Contributors never get this option.",
+      raci: { responsible: "Uploading Manager", accountable: "Uploading Manager" },
+    },
+  ],
+];
+
+const TEAM_FLOW: FlowNode[][] = [
+  [
+    {
+      label: "Upload for your team",
+      note: "Team Contributor or Manager",
+      tone: "start",
+      detail:
+        "Choose Restricted to teams and tick your team. If your role only lets you upload for your team (for example Sales), Everyone is greyed out. You can pick a folder too. Org Contributors and Managers can also upload into a team they aren't in; they then see only that one document there.",
+      raci: { responsible: "Uploader", accountable: "Uploader", informed: "The team Manager chosen as reviewer" },
+    },
+  ],
+  [
+    {
+      label: "Team Manager reviews",
+      note: "Same rules as any review",
+      tone: "neutral",
+      detail:
+        "Only Managers of that team can be picked as reviewer. They approve, or reject with comments and a new version starts the next round. A team Manager's own upload may skip review with No review needed.",
+      raci: { responsible: "Team Manager", accountable: "Team Manager", informed: "Uploader" },
+    },
+  ],
+  [
+    {
+      label: "Visible to the team only",
+      note: "Home > My teams",
       tone: "success",
       detail:
-        "The document is now visible to every signed-in user in search and listings, with whatever feedback and sharing settings were chosen at approval.",
-      raci: { responsible: "Reviewing Manager", accountable: "Reviewing Manager", informed: "All users, if announced" },
+        "Only the team's members see it, plus superadmins and anyone with Sees all teams. It stays out of everyone else's search, AI answers and notifications, and can't be shared outside the company.",
+      raci: { responsible: "Team Manager", accountable: "Team Manager", informed: "Team members, if notified" },
+    },
+  ],
+];
+
+const EVERYONE_REQUEST_FLOW: FlowNode[][] = [
+  [
+    {
+      label: "Request for Everyone",
+      note: "Team Manager, from the Manage tab",
+      tone: "start",
+      detail: "When a team document should be visible to the whole company, a team Manager asks for it with a reason.",
+      raci: { responsible: "Team Manager", accountable: "Team Manager", informed: "Global approver" },
+    },
+  ],
+  [
+    {
+      label: "Global approver decides",
+      note: "One Manager picked by the superadmin",
+      tone: "neutral",
+      detail: "It shows in their My Work > Waiting on me. They can open the document to read it before deciding.",
+      raci: { responsible: "Global approver", accountable: "Global approver" },
+    },
+  ],
+  [
+    {
+      label: "Opened to everyone",
+      tone: "success",
+      detail: "The document moves to Home > Everyone, and the team Manager is told.",
+      raci: { responsible: "Global approver", accountable: "Global approver", informed: "Team Manager who asked" },
+    },
+    {
+      label: "Sent back",
+      note: "Comment required",
+      tone: "danger",
+      detail: "It stays with the team, and the team Manager sees the comment on the Manage tab.",
+      raci: { responsible: "Global approver", accountable: "Global approver", informed: "Team Manager who asked" },
+    },
+  ],
+];
+
+const FOLDERS_FLOW: FlowNode[][] = [
+  [
+    {
+      label: "Create folders",
+      note: "Team Managers",
+      tone: "start",
+      detail: "On Home > My teams, pick your team and use New folder. Rename or delete the open folder from the same bar. Deleting a folder keeps its documents.",
+      raci: { responsible: "Team Manager", accountable: "Team Manager" },
+    },
+  ],
+  [
+    {
+      label: "File documents",
+      note: "At upload, or from Manage",
+      tone: "neutral",
+      detail: "The uploader can pick a folder when uploading for one team. A team Manager can move any team document from its Manage tab.",
+      raci: { responsible: "Uploader or Team Manager", accountable: "Team Manager" },
+    },
+  ],
+  [
+    {
+      label: "Browse and search",
+      note: "Everyone in the team",
+      tone: "success",
+      detail: "Click a folder to see what's in it. The search box above the list looks through titles, tags and the text inside the team's files.",
+      raci: { responsible: "Any team member" },
     },
   ],
 ];
@@ -140,24 +250,18 @@ const POST_PUBLISH_FLOW: FlowNode[][] = [
     {
       label: "Published",
       tone: "success",
-      detail: "A live document isn't locked in place, any Manager can still revoke, archive, or delete it whenever the situation calls for it.",
-      raci: { responsible: "Any Manager", accountable: "Any Manager", informed: "Uploader" },
+      detail: "A live document isn't locked in place. The Manager who approved it (or anyone added as its reviewer) can still archive or delete it. Other Managers can only view it.",
+      raci: { responsible: "Approving Manager", accountable: "Approving Manager", informed: "Uploader" },
     },
   ],
   [
     {
-      label: "Revoked",
-      note: "Pulled back into review, needs approval again",
-      tone: "warn",
-      detail: "Pulled back out of the published list and returned to Pending Review. It needs to be approved again before anyone can see it.",
-      raci: { responsible: "Manager who revokes it", accountable: "Manager who revokes it", informed: "Uploader" },
-    },
-    {
       label: "Archived",
-      note: "Retired, no longer active",
+      note: "Taken out of circulation",
       tone: "neutral",
-      detail: "Retired from active use without deleting it. A Manager can restore it, extend it, or mark it permanent later.",
-      raci: { responsible: "Manager", accountable: "Manager", informed: "Uploader" },
+      detail:
+        "Hidden from everyone. If it was published, everyone who could see it is told to stop using it. A Manager can restore it, which sends it back for approval before it's visible again.",
+      raci: { responsible: "Manager", accountable: "Manager", informed: "Everyone who could see it" },
     },
     {
       label: "Deleted",
@@ -220,7 +324,7 @@ const SHARE_FLOW: FlowNode[][] = [
       label: "Sharing turned on",
       note: "At publish, or later from Manage",
       tone: "start",
-      detail: "Decided by the Manager at publish time, or flipped on later from the document's Manage tab by a Manager or the uploader.",
+      detail: "Decided by the Manager at publish time, or flipped on later from the document's Manage tab by a Manager or the uploader. Only documents for Everyone can be shared: team documents stay inside the company.",
       raci: { responsible: "Manager (at publish) or uploader (later)", accountable: "Manager" },
     },
   ],
@@ -300,11 +404,34 @@ const PASSWORD_RESET_FLOW: FlowNode[][] = [
   ],
 ];
 
+/** A titled group of step-by-step guides on the Help page. */
+function GuideGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h2 className="mb-3 border-b border-ff-border pb-1.5 text-xs font-bold uppercase tracking-wide text-ff-textMuted">{title}</h2>
+      <div className="space-y-4">{children}</div>
+    </div>
+  );
+}
+
 export default async function HelpGuidePage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const guide = ROLE_GUIDES[user.role];
+  const myTeams = await prisma.team.findMany({
+    where: { id: { in: user.teamIds } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+  const viewTeams = user.viewTeamIds.length
+    ? await prisma.team.findMany({ where: { id: { in: user.viewTeamIds } }, orderBy: { name: "asc" }, select: { name: true } })
+    : [];
+  // Which step-by-step guides apply to this person.
+  const canUploadForEveryone = ["contributor", "manager", "superadmin"].includes(user.role);
+  const inATeam = myTeams.length > 0;
+  const managesATeam = myTeams.some((t) => user.teamRoles[t.id] === "manager");
+  const decidesEveryone = user.isGlobalApprover && user.role === "manager";
+  const isManager = user.role === "manager" || managesATeam;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
@@ -312,125 +439,94 @@ export default async function HelpGuidePage() {
         role={user.role}
         userName={user.name}
         userEmail={user.email}
-        userDesignation={user.designation?.name}
         userTeam={user.team?.name}
         userReportsTo={user.reportsTo?.name}
       />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-7xl px-6 py-8 animate-fade-in">
         <div className="space-y-10">
-          <section className="max-w-5xl">
-            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">What You Can Do</h1>
+          <section className="max-w-3xl">
+            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">What you can do</h1>
             <p className="mb-6 text-sm text-ff-textMuted">
-              Based on your role: <span className="font-semibold text-ff-text">{ROLE_LABELS[user.role]}</span>
+              {ORG_LEVEL.title}: <strong className="text-ff-text">{ROLE_LABELS[user.role]}</strong>
+              {myTeams.length > 0 && (
+                <>
+                  {" "}
+                  &middot; {TEAM_LEVEL.title}:{" "}
+                  <strong className="text-ff-text">
+                    {myTeams.map((t) => `${t.name} (${TEAM_ROLE_LABEL[user.teamRoles[t.id] ?? "member"]})`).join(", ")}
+                  </strong>
+                </>
+              )}
             </p>
 
-            {guide ? (
-              <div className="overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff">
-                <div className="flex items-center gap-3 border-b border-ff-border bg-ff-lavender/30 px-5 py-4">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ff-accent text-white shadow-ff">
-                    <guide.icon className="h-5 w-5" aria-hidden />
-                  </span>
-                  <div>
-                    <h2 className="text-base font-bold text-ff-text">{ROLE_LABELS[user.role]}</h2>
-                    <p className="text-xs text-ff-textMuted">{guide.tagline}</p>
-                  </div>
+            <div className="space-y-4">
+              {whatYouCanDo({
+                role: user.role,
+                isGlobalApprover: user.isGlobalApprover,
+                seesAllTeams: user.seesAllTeams,
+                viewTeamNames: viewTeams.map((t) => t.name),
+                teams: myTeams.map((t) => ({ name: t.name, role: user.teamRoles[t.id] ?? "member" })),
+              }).map((g) => (
+                <div key={g.heading} className="rounded-ff border border-ff-border bg-white p-4 shadow-ff">
+                  <h2 className="mb-2 text-base font-bold text-ff-text">{g.heading}</h2>
+                  <ul className="space-y-1.5 text-sm text-ff-text">
+                    {g.items.map((item) => (
+                      <li key={item} className="flex gap-2">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-ff-success" aria-hidden />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-
-                {/* Centered as a group, each card sized to its own content
-                    (not stretched to fill the section's full width) — a
-                    short "Cannot Do" list now reads as its own compact card
-                    sitting next to a bigger one, both in the middle of the
-                    section, rather than two halves stretched edge to edge
-                    with empty space inside the shorter one. */}
-                <div className="flex flex-wrap items-start justify-center gap-4 p-5">
-                  <div className="w-full rounded-ff border border-ff-success/25 bg-ff-success/5 p-4 sm:w-auto sm:max-w-xl">
-                    <h3 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-ff-success">
-                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-                      Can Do
-                    </h3>
-                    <ul className="space-y-2.5 text-sm text-ff-text">
-                      {guide.canDo.map((item) => (
-                        <li key={item} className="flex gap-2">
-                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ff-success" aria-hidden />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="w-full rounded-ff border border-ff-border bg-ff-lavender/20 p-4 sm:w-auto sm:max-w-xs">
-                    <h3 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-ff-textMuted">
-                      <XCircle className="h-3.5 w-3.5" aria-hidden />
-                      Cannot Do
-                    </h3>
-                    {guide.cannotDo && guide.cannotDo.length > 0 ? (
-                      <ul className="space-y-2.5 text-sm text-ff-textMuted">
-                        {guide.cannotDo.map((item) => (
-                          <li key={item} className="flex gap-2">
-                            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ff-danger/60" aria-hidden />
-                            <span>{item}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-sm italic text-ff-textMuted">Nothing restricted beyond standard access controls.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff">
-                <div className="flex items-center gap-3 border-b border-ff-border bg-ff-lavender/30 px-5 py-4">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ff-accent text-white shadow-ff">
-                    <ShieldCheck className="h-5 w-5" aria-hidden />
-                  </span>
-                  <div>
-                    <h2 className="text-base font-bold text-ff-text">{ROLE_LABELS[user.role]}</h2>
-                    <p className="text-xs text-ff-textMuted">Full administrative access across the app.</p>
-                  </div>
-                </div>
-                <p className="p-5 text-sm text-ff-text">
-                  See Admin → Manage Users, Categories, Settings, and Announcements.
-                </p>
-              </div>
-            )}
+              ))}
+              {myTeams.length === 0 && user.role !== "superadmin" && (
+                <p className="text-sm text-ff-textMuted">You aren&apos;t in a team. A superadmin can add you in People.</p>
+              )}
+            </div>
           </section>
 
           <section className="max-w-5xl">
-            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">How Things Work</h1>
-            <p className="mb-6 text-sm text-ff-textMuted">The workflow behind each major feature.</p>
+            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">How it works</h1>
+            <p className="mb-6 text-sm text-ff-textMuted">Step by step, for the things you do.</p>
 
-            <div className="space-y-4">
-              <WorkflowChart
-                title="Getting a document published"
-                description="Every upload goes through one specific reviewer before anyone else can see it."
-                steps={PUBLISH_FLOW}
-              />
+            <div className="space-y-8">
+              {(canUploadForEveryone || inATeam) && (
+                <GuideGroup title="Uploading">
+                  {canUploadForEveryone && (
+                    <WorkflowChart title="Publishing a document for everyone" description="Every upload goes to one reviewer before anyone else can see it." steps={PUBLISH_FLOW} />
+                  )}
+                  {inATeam && (
+                    <WorkflowChart title="Publishing a document for your team" description="Same review rules, but only the team ever sees it." steps={TEAM_FLOW} />
+                  )}
+                </GuideGroup>
+              )}
 
-              <WorkflowChart
-                title="After it's published"
-                description="A published document isn't the end of the line, a Manager can still act on it."
-                steps={POST_PUBLISH_FLOW}
-              />
+              {(inATeam || decidesEveryone) && (
+                <GuideGroup title="Team documents">
+                  {inATeam && (
+                    <WorkflowChart title="Folders and search" description="Keep a team's documents organised and easy to find." steps={FOLDERS_FLOW} />
+                  )}
+                  {(managesATeam || decidesEveryone) && (
+                    <WorkflowChart title="Opening a team document to everyone" description="Nobody inside a team can do this alone: one Global approver decides." steps={EVERYONE_REQUEST_FLOW} />
+                  )}
+                </GuideGroup>
+              )}
 
-              <WorkflowChart
-                title="Feedback on a document"
-                description="Only when the publishing Manager (or the doc's uploader afterward) has feedback turned on."
-                steps={FEEDBACK_FLOW}
-              />
+              <GuideGroup title="Using documents">
+                  <WorkflowChart title="Sharing with customers" description="Only documents for everyone, and only when sharing is turned on for that document." steps={SHARE_FLOW} />
+                  <WorkflowChart title="Leaving feedback" description="Only when feedback is turned on for that document." steps={FEEDBACK_FLOW} />
+              </GuideGroup>
 
-              <WorkflowChart
-                title="Sharing a document publicly"
-                description="Only when sharing is turned on for that document, decided at publish time, changeable anytime after."
-                steps={SHARE_FLOW}
-              />
+              {isManager && (
+                <GuideGroup title="Managing documents">
+                  <WorkflowChart title="Taking a document down" description="Archive takes it out of circulation; restoring it goes back through review." steps={POST_PUBLISH_FLOW} />
+                </GuideGroup>
+              )}
 
-              <WorkflowChart
-                title="Forgot your password"
-                description="Fully self-service, no admin needed."
-                steps={PASSWORD_RESET_FLOW}
-              />
+              <GuideGroup title="Your account">
+                  <WorkflowChart title="Forgot your password" description="Fully self-service, no admin needed." steps={PASSWORD_RESET_FLOW} />
+              </GuideGroup>
             </div>
           </section>
         </div>

@@ -69,13 +69,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // Phones often add a space after an autocompleted email, which Supabase
+    // treats as a different address ("incorrect" for the right details).
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
     if (error) {
       setError("Email or password is incorrect.");
       return;
     }
-    router.push("/dashboard/home");
+    router.push("/dashboard");
   }
 
   return (

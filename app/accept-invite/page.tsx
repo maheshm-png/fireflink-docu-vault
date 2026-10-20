@@ -97,7 +97,7 @@ export default function AcceptInvitePage() {
     // Full page load, not router.push: this page was usually reached by a
     // client-side redirect from middleware, and the router doesn't reliably
     // leave it again for the same target it was just bounced away from.
-    setTimeout(() => window.location.assign(relogin && !relogin.error ? "/dashboard/home" : "/login"), 1500);
+    setTimeout(() => window.location.assign(relogin && !relogin.error ? "/dashboard" : "/login"), 1500);
   }
 
   return (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, passesTeamGate } from "@/lib/access";
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
@@ -15,7 +16,11 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!can(user.role, "editOwnUpload")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const role = await documentRoleById(user, params.id);
+  if (!can(role, "editOwnUpload")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const document = await prisma.document.findUniqueOrThrow({
     where: { id: params.id },
@@ -28,8 +33,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const canEdit =
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
-    user.role === "manager" ||
-    user.role === "superadmin";
+    role === "manager" ||
+    role === "superadmin";
   if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const text = document.currentVersion?.extractedText;

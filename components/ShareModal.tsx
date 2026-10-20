@@ -53,6 +53,9 @@ export default function ShareModal({ documentId }: { documentId: string }) {
   const [expirySelection, setExpirySelection] = useState("24");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // False for a preview-only document (lib/access.ts downloadsAllowed): the
+  // link can only ever allow viewing.
+  const [downloadAllowed, setDownloadAllowed] = useState(true);
 
   async function openModal() {
     setOpen(true);
@@ -65,6 +68,7 @@ export default function ShareModal({ documentId }: { documentId: string }) {
       setError(data?.error ?? "Could not load sharing settings.");
       return;
     }
+    setDownloadAllowed(data.downloadAllowed !== false);
     if (data.share) {
       setShare(data.share);
       setAccessLevel(data.share.accessLevel);
@@ -178,7 +182,7 @@ export default function ShareModal({ documentId }: { documentId: string }) {
               <div className="mb-4">
                 <label className="mb-1.5 block text-xs font-medium text-ff-textMuted">Access</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {ACCESS_OPTIONS.map(({ value, label, Icon }) => (
+                  {ACCESS_OPTIONS.filter((o) => downloadAllowed || o.value === "view").map(({ value, label, Icon }) => (
                     <button
                       key={value}
                       type="button"
@@ -205,6 +209,9 @@ export default function ShareModal({ documentId }: { documentId: string }) {
                     </button>
                   ))}
                 </div>
+                {!downloadAllowed && (
+                  <p className="mt-1.5 text-xs text-ff-textMuted">This document is preview only, so the link can only allow viewing.</p>
+                )}
               </div>
 
               <div className="mb-4">

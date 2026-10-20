@@ -9,6 +9,8 @@ type ApprovalEntry = {
   label: string;
   reviewerNames: string[];
   approvedAt: string | null;
+  // Published with "No review needed" by the uploading manager.
+  bypassed?: boolean;
 };
 
 /**
@@ -54,7 +56,7 @@ export default function ReviewHistoryModal({ entries }: { entries: ApprovalEntry
                 </span>
                 <div>
                   <h2 className="text-base font-semibold text-ff-text">Review History</h2>
-                  <p className="mt-0.5 text-xs text-ff-textMuted">Which version, approved by whom.</p>
+                  <p className="mt-0.5 text-xs text-ff-textMuted">Which version, and who approved or published it.</p>
                 </div>
               </div>
               <button
@@ -78,7 +80,7 @@ export default function ReviewHistoryModal({ entries }: { entries: ApprovalEntry
                   </span>
                   <p className="text-sm font-semibold text-ff-text">{e.label}</p>
                   <p className="text-xs text-ff-textMuted">
-                    Approved by {e.reviewerNames.join(", ") || "a manager"}
+                    {e.bypassed ? "Published without review by" : "Approved by"} {e.reviewerNames.join(", ") || "a manager"}
                     {e.approvedAt && (
                       <>
                         {" "}

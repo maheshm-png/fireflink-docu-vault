@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { everApprovedVersionIds, computeRoundAttempts } from "@/lib/versionRounds";
-import { notifyFeedbackTagged, fireNotification } from "@/lib/notify";
+import { notifyFeedbackTagged, notifySeesAllComment, fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, isSeesAllOutsider, passesTeamGate } from "@/lib/access";
 
 // POST /api/documents/:id/feedback — { highlightedText, comment }
 // Open feedback from ANY authenticated user — not gated by review
@@ -23,14 +24,23 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUnique({
     where: { id: params.id },
-    include: { versions: { select: { id: true, versionNumber: true, uploadedAt: true } } },
+    include: {
+      versions: { select: { id: true, versionNumber: true, uploadedAt: true } },
+      teamAccess: { select: { teamId: true } },
+    },
   });
   if (!document || document.deletedAt) {
     return NextResponse.json({ error: "Document not found." }, { status: 404 });
   }
+  // Someone who "Sees all teams" may comment on any team's document, even with feedback
+  // closed, and that team's managers are told (lib/access.ts).
+  const leadershipComment = isSeesAllOutsider(user, document);
 
   const reviewRequests = await prisma.reviewRequest.findMany({
     where: { documentId: document.id },
@@ -41,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt).has(document.currentVersionId);
   const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
 
-  if (!isPubliclyVisible || !document.feedbackEnabled) {
+  if (!isPubliclyVisible || (!document.feedbackEnabled && !leadershipComment)) {
     return NextResponse.json({ error: "Feedback isn't open on this document." }, { status: 403 });
   }
 
@@ -127,6 +137,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
+  if (leadershipComment) {
+    const managers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        id: { not: user.id },
+        teamMemberships: { some: { teamId: { in: document.teamAccess.map((a) => a.teamId) }, role: "manager" } },
+      },
+      select: { id: true, name: true, email: true },
+    });
+    fireNotification(
+      notifySeesAllComment({
+        documentTitle: document.title,
+        documentId: document.id,
+        authorName: user.name,
+        comment: trimmedComment,
+        managers,
+      })
+    );
+  }
+
   return NextResponse.json({ feedback: created }, { status: 201 });
 }
 
@@ -141,6 +171,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const document = await prisma.document.findUnique({
     where: { id: params.id },
@@ -150,7 +183,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Document not found." }, { status: 404 });
   }
 
-  const canManage = user.role === "manager" || user.role === "superadmin" || document.uploadedById === user.id;
+  const role = await documentRoleById(user, params.id);
+  const canManage = role === "manager" || role === "superadmin" || document.uploadedById === user.id;
   if (!canManage) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { addWatermark } from "@/lib/watermark";
 import { computeRoundAttempts, everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { accessInclude, downloadsAllowed, involvedInReview, teamAllows } from "@/lib/access";
 
 const WATERMARKED_DOC_TYPES = new Set(["doc", "ppt", "excel"]);
 
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const document = await prisma.document.findUniqueOrThrow({
     where: { id: params.id },
-    include: { currentVersion: true, versions: true },
+    include: { currentVersion: true, versions: true, ...accessInclude },
   });
 
   // Soft-deleted docs are off-limits until restored, even for managers —
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // canSeeUnpublishedDoc — a manager with no assignment on this document
   // can't download it early either.
   const canAccessUnpublished =
-    isPubliclyVisible ||
+    (isPubliclyVisible && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequests.some((r) => r.reviewerId === user.id) ||
@@ -111,13 +112,24 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
-  // Only the current live version can ever be downloaded — enforced here
+  // The uploader and the reviewers (lib/access.ts involvedInReview) may
+  // download the version under review: reviewing a deck or spreadsheet often
+  // needs the real file. It's their working copy, so no viewer watermark and
+  // the publish-time "Preview only" choice doesn't apply to it.
+  const involved = involvedInReview(user, document, reviewRequests);
+  const isUnpublishedVersion = document.currentVersionId !== version.id;
+
+  // Preview-only documents (the approving manager turned downloads off)
+  // can't be downloaded by anyone, in any format (lib/access.ts
+  // downloadsAllowed), apart from the version still under review above.
+  if (!downloadsAllowed(document) && !(isUnpublishedVersion && involved)) {
+    return NextResponse.json({ error: "This document is preview only. Downloading is turned off." }, { status: 403 });
+  }
+
+  // Everyone else only ever downloads the current live version, enforced here
   // (not just by omitting the UI control) since ?version= is a plain query
-  // param anyone could add by hand. Applies to every role: a manager or the
-  // uploader reviewing a fresh upload can still PREVIEW it (/preview has no
-  // such restriction), just not download a copy until it's actually
-  // published and becomes the current version.
-  if (document.currentVersionId !== version.id) {
+  // param anyone could add by hand.
+  if (isUnpublishedVersion && !involved) {
     return NextResponse.json({ error: "Only the current version is available to download." }, { status: 403 });
   }
 
@@ -140,7 +152,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.redirect(url);
   }
 
-  const needsWatermark = user.role === "user" && WATERMARKED_DOC_TYPES.has(document.docType);
+  const needsWatermark = user.role === "user" && !involved && WATERMARKED_DOC_TYPES.has(document.docType);
 
   if (needsWatermark) {
     let watermarked: Buffer;

@@ -38,12 +38,16 @@ export default function DocumentFilters({
   options,
   saved,
   keepKeys,
+  compact = false,
 }: {
   basePath: string;
   section: string;
   options: FilterOptions;
   saved: SavedFilterChip[];
   keepKeys: string[];
+  // Just the Filters button, without the quick Type / Uploaded by / Owner
+  // dropdowns next to it (used where the toolbar is already full).
+  compact?: boolean;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -153,7 +157,7 @@ export default function DocumentFilters({
           )}
         </button>
 
-        {QUICK_FILTERS.map(({ key, label }) => {
+        {!compact && QUICK_FILTERS.map(({ key, label }) => {
           const opts = quickOptions(key);
           if (opts.length === 0) return null;
           return (

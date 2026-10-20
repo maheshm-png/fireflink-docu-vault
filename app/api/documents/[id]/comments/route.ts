@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { passesTeamGate } from "@/lib/access";
 
 // POST /api/documents/:id/comments — { highlightedText, comment }
 // Adds an inline comment tied to the caller's own active pending review
@@ -12,6 +13,9 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const myRequest = await prisma.reviewRequest.findFirst({
     where: { documentId: params.id, reviewerId: user.id, status: "pending" },

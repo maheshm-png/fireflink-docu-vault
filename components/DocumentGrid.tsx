@@ -6,9 +6,10 @@ import DocTypeIcon from "./DocTypeIcon";
 import DocumentPreview from "./DocumentPreview";
 import DownloadMenu from "./DownloadMenu";
 import LiveNewDocBadge from "./LiveNewDocBadge";
-import { type DocRow, StatusBadge, EmptyDocuments } from "./DocumentTable";
+import { type DocRow, StatusBadge, EmptyDocuments, isPreviewOnly, InvolvementChips } from "./DocumentTable";
 import { LocalDateTime } from "./LocalDateTime";
 import Badge from "./Badge";
+import AccessBadges from "./AccessBadges";
 
 export default function DocumentGrid({
   rows,
@@ -60,6 +61,7 @@ export default function DocumentGrid({
             <div className="flex flex-wrap items-center gap-1.5">
               <p className="line-clamp-2 font-medium text-ff-text">{doc.title}</p>
               <LiveNewDocBadge documentId={doc.id} className="shrink-0" />
+              <AccessBadges visibility={doc.visibility} teamNames={doc.accessTeamNames} reviewBypassed={doc.reviewBypassed} downloadable={doc.downloadable} />
               {doc.hasPendingApproval && (
                 <Badge
                   variant="warning"
@@ -73,10 +75,11 @@ export default function DocumentGrid({
               )}
             </div>
             <p className="mt-1 text-xs text-ff-textMuted">{doc.categoryName}</p>
+            {doc.involvement && <InvolvementChips involvement={doc.involvement} className="mt-1.5" />}
           </div>
 
           <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-            <StatusBadge status={doc.status} />
+            <StatusBadge status={doc.status} label={doc.statusLabel} />
             <span className="truncate text-xs text-ff-textMuted">{doc.uploadedByName}</span>
           </div>
           <div className="flex items-center justify-between gap-2">
@@ -89,6 +92,7 @@ export default function DocumentGrid({
                   extractedText={doc.extractedText}
                   hasPreviewPdf={doc.hasPreviewPdf}
                   externalUrl={doc.externalUrl}
+                  previewOnly={isPreviewOnly(doc)}
                   variant="icon"
                   label="Quick preview"
                 />
@@ -110,7 +114,8 @@ export default function DocumentGrid({
                   )
                 ) : (
                   doc.hasCurrentVersion !== false &&
-                  !doc.hideDownload && (
+                  !doc.hideDownload &&
+                  !isPreviewOnly(doc) && (
                     <DownloadMenu
                       documentId={doc.id}
                       hasPreviewPdf={doc.hasPreviewPdf}

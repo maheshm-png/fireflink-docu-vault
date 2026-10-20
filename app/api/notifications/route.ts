@@ -21,7 +21,7 @@ export async function GET() {
     }),
     prisma.notification.findMany({ where: { userId: user.id, read: false }, select: { documentId: true } }),
   ]);
-  const [notifications, liveUnread] = await Promise.all([withoutDeletedDocuments(recent), withoutDeletedDocuments(unread)]);
+  const [notifications, liveUnread] = await Promise.all([withoutDeletedDocuments(user, recent), withoutDeletedDocuments(user, unread)]);
 
   return NextResponse.json({ notifications: notifications.slice(0, 30), unreadCount: liveUnread.length });
 }

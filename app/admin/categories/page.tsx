@@ -19,11 +19,11 @@ export default async function CategoriesPage() {
   if (user.role === "user") redirect("/dashboard");
   const canManage = can(user.role, "manageCategories");
 
-  const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
+  const categories = await prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" } });
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">

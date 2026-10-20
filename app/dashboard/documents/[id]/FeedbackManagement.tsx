@@ -1,5 +1,6 @@
 "use client";
 
+import InfoTooltip from "@/components/InfoTooltip";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { MessageCircle } from "lucide-react";
@@ -57,10 +58,9 @@ export default function FeedbackManagement({
             <MessageCircle className="h-4 w-4" aria-hidden />
           </span>
           <div>
-            <p className="text-sm font-semibold text-ff-text">Accept New Feedback</p>
-            <p className="text-xs text-ff-textMuted">
-              Lets anyone viewing this document leave feedback. Turn off to stop taking new comments without
-              removing what&apos;s already there.
+            <p className="flex items-center gap-1 text-sm font-semibold text-ff-text">
+              Accept New Feedback
+              <InfoTooltip text="Lets anyone viewing this document leave feedback. Turning it off stops new comments without removing what's already there." />
             </p>
           </div>
         </div>

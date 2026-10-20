@@ -23,7 +23,7 @@ enum Role {
   superadmin
   manager
   contributor // was "sc" (Solution Consultant) — renamed to Contributor
-  user        // view-only (also covers former Business Development role, merged in) — was "other"
+  user // view-only (also covers former Business Development role, merged in) — was "other"
 }
 
 enum DocType {
@@ -32,7 +32,7 @@ enum DocType {
   pdf
   doc
   excel
-  link  // externally hosted (Google Docs/Sheets/Slides, etc.) — see Document.externalUrl
+  link // externally hosted (Google Docs/Sheets/Slides, etc.) — see Document.externalUrl
   other
 }
 
@@ -50,8 +50,18 @@ enum ReviewStatus {
   rejected
 }
 
+// Who can see a document. "org" is everyone (how every document worked
+// before team access existed, and still the default). "restricted" limits it
+// to members of the teams in Document.teamAccess, plus the people working on
+// it (uploader, owner, assigned reviewers), superadmins, and people with
+// User.seesAllTeams. See lib/access.ts, the one place this rule lives.
+enum DocVisibility {
+  org
+  restricted
+}
+
 enum ShareAccessLevel {
-  view          // can view/preview only
+  view // can view/preview only
   view_download // can also download the original file
 }
 
@@ -71,8 +81,8 @@ model User {
   // review time (reassign / request a second opinion — see
   // app/api/documents/[id]/review/route.ts), so there's no fixed hierarchy
   // among them to record here.
-  reportsToId  String?
-  reportsTo    User?    @relation("ReportsTo", fields: [reportsToId], references: [id])
+  reportsToId   String?
+  reportsTo     User?   @relation("ReportsTo", fields: [reportsToId], references: [id])
   directReports User[]  @relation("ReportsTo")
 
   // Job title, e.g. "Presales Consultant" — picked from the admin-managed
@@ -81,34 +91,54 @@ model User {
   designationId String?
   designation   Designation? @relation(fields: [designationId], references: [id])
 
-  // Which team this person belongs to, e.g. "Engineering", "Sales" — picked
-  // from the admin-managed list below (app/admin/teams), independent of
-  // both role (what they're allowed to do) and reportsToId (who they
-  // report to): a real department grouping, not derived from either.
-  // Powers the grouping on app/admin/users (page.tsx groups by this
-  // instead of reportsToId).
+  // DEPRECATED: the single team a user had before multi-team membership.
+  // Superseded by teamMemberships (UserTeam) below; the migration that
+  // added UserTeam copied every value from here into it. Kept, unread, so
+  // that migration can be rolled back without losing anyone's team. Drop it
+  // in a later migration once team access has settled in production.
   teamId String?
-  team   Team? @relation(fields: [teamId], references: [id])
+  team   Team?   @relation(fields: [teamId], references: [id])
 
-  uploadedDocuments   Document[]        @relation("UploadedBy")
-  ownedDocuments      Document[]        @relation("OwnedBy")
-  deletedDocuments    Document[]        @relation("DeletedBy")
-  revokedDocuments    Document[]        @relation("RevokedBy")
-  uploadedVersions    DocumentVersion[]
-  reviewsRequested    ReviewRequest[]   @relation("RequestedBy")
-  reviewsAssigned     ReviewRequest[]   @relation("ReviewerFor")
-  auditEntries        AuditLog[]
-  events              DocumentEvent[]
-  notifications       Notification[]
-  categoriesCreated   Category[]
-  announcementsPosted Announcement[]
-  shareLinksCreated   ShareLink[]
+  // Which teams this person belongs to, e.g. "Engineering", "Sales" — picked
+  // from the admin-managed list (app/admin/teams). Independent of role (what
+  // they're allowed to do) and reportsToId (who they report to). Drives
+  // restricted-document access (lib/access.ts) and the grouping on
+  // app/admin/users.
+  teamMemberships UserTeam[]
+
+  // Leadership view (lib/access.ts): view, download and comment on team
+  // documents without being in the team, nothing more. Either every team
+  // (seesAllTeams) or only the teams in viewTeams. Set in People.
+  seesAllTeams          Boolean                @default(false)
+  viewTeams             UserViewTeam[]
+  // The one "Global approver" (at most one user, an org manager), picked
+  // by a superadmin in Settings: decides every team's "Request for Everyone"
+  // (GlobalPublishRequest, lib/access.ts decidesEveryoneRequests).
+  isGlobalApprover      Boolean                @default(false)
+  globalRequestsRaised  GlobalPublishRequest[] @relation("GlobalRequestRaisedBy")
+  globalRequestsDecided GlobalPublishRequest[] @relation("GlobalRequestDecidedBy")
+
+  teamFoldersCreated     TeamFolder[]         @relation("TeamFolderCreatedBy")
+  uploadedDocuments      Document[]           @relation("UploadedBy")
+  ownedDocuments         Document[]           @relation("OwnedBy")
+  deletedDocuments       Document[]           @relation("DeletedBy")
+  revokedDocuments       Document[]           @relation("RevokedBy")
+  uploadedVersions       DocumentVersion[]
+  reviewsRequested       ReviewRequest[]      @relation("RequestedBy")
+  reviewsAssigned        ReviewRequest[]      @relation("ReviewerFor")
+  auditEntries           AuditLog[]
+  events                 DocumentEvent[]
+  notifications          Notification[]
+  categoriesCreated      Category[]
+  announcementsPosted    Announcement[]
+  shareLinksCreated      ShareLink[]
   inlineCommentsAuthored InlineComment[]
-  feedbackAuthored    DocumentFeedback[] @relation("FeedbackAuthor")
-  feedbackStatusChanged DocumentFeedback[] @relation("FeedbackStatusChangedBy")
-  feedbackTagged      DocumentFeedback[] @relation("FeedbackTaggedUser")
-  feedbackRepliesSent FeedbackReply[]
-  savedFilters        SavedFilter[]
+  feedbackAuthored       DocumentFeedback[]   @relation("FeedbackAuthor")
+  feedbackStatusChanged  DocumentFeedback[]   @relation("FeedbackStatusChangedBy")
+  feedbackTagged         DocumentFeedback[]   @relation("FeedbackTaggedUser")
+  feedbackRepliesSent    FeedbackReply[]
+  savedFilters           SavedFilter[]
+  teamAccessGranted      DocumentTeamAccess[] @relation("TeamAccessGrantedBy")
 }
 
 // Admin-managed job-title options for User.designation (app/admin/
@@ -120,11 +150,94 @@ model User {
 // and from reportsToId (who they report to) — a person's team, title, and
 // manager are three independent facts about them.
 model Team {
-  id        String   @id @default(uuid())
-  name      String   @unique
+  id           String   @id @default(uuid())
+  name         String   @unique
+  createdAt    DateTime @default(now())
+  // Unused since 2026-10-12: replaced by the per-person User.seesAllTeams
+  // (migration 20261012120000 copied it over). Kept so a rollback loses nothing.
+  isLeadership Boolean  @default(false)
+
+  users          User[]
+  memberships    UserTeam[]
+  // Restrict, not cascade: deleting a team that still guards restricted
+  // documents would leave them visible to nobody but their stakeholders.
+  // app/api/admin/teams/[id] refuses the delete with a clear message first.
+  documentAccess DocumentTeamAccess[]
+  folders        TeamFolder[]
+  viewers        UserViewTeam[]
+}
+
+// Leadership view of one team: view, download and comment on its documents
+// without being a member (lib/access.ts). The "selected teams" form of
+// User.seesAllTeams.
+model UserViewTeam {
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  @@id([userId, teamId])
+  @@index([teamId])
+}
+
+// What someone may do INSIDE one team, separate from User.role (what they
+// may do with documents visible to everyone). See lib/access.ts.
+//   member      sees the team's restricted documents
+//   contributor also uploads documents restricted to the team
+//   manager     also approves the team's documents and its sharing
+enum TeamRole {
+  member
+  contributor
+  manager
+}
+
+model UserTeam {
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  role      TeamRole @default(member)
   createdAt DateTime @default(now())
 
-  users User[]
+  @@id([userId, teamId])
+  @@index([teamId])
+}
+
+// Which teams may see a restricted document (Document.visibility). Ignored
+// while the document is "org". Kept as rows rather than a single teamId so a
+// document can be shared with more than one team.
+model DocumentTeamAccess {
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  teamId      String
+  grantedBy   User     @relation("TeamAccessGrantedBy", fields: [grantedById], references: [id])
+  grantedById String
+  createdAt   DateTime @default(now())
+  // Where this team files the document inside My teams (null = not in a
+  // folder). Per team, since one document can belong to several teams.
+  folder      TeamFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  folderId    String?
+
+  @@id([documentId, teamId])
+  @@index([teamId])
+  @@index([folderId])
+}
+
+// A folder inside one team's documents (Home > My teams), created by that
+// team's managers (lib/access.ts canManageFolders). Deleting a folder only
+// unfiles its documents.
+model TeamFolder {
+  id          String               @id @default(uuid())
+  team        Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  name        String
+  createdBy   User                 @relation("TeamFolderCreatedBy", fields: [createdById], references: [id])
+  createdById String
+  createdAt   DateTime             @default(now())
+  documents   DocumentTeamAccess[]
+
+  @@unique([teamId, name])
 }
 
 model Designation {
@@ -132,7 +245,7 @@ model Designation {
   name      String   @unique
   createdAt DateTime @default(now())
 
-  users     User[]
+  users User[]
 }
 
 // A tile on the FireFlink Workspace launcher (app/page.tsx, the public
@@ -160,36 +273,42 @@ model WorkspaceApp {
 }
 
 model Category {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
   // Review cycle in days before a doc in this category is flagged stale —
   // null means "no cycle": documents uploaded into this category are
   // marked permanent (Document.neverExpires) by default at upload time
   // (see app/api/documents/route.ts) and never get staleness-flagged.
-  reviewCycleDays Int?  @default(90)
+  reviewCycleDays Int?     @default(90)
   // Manager-defined upload form for this category — an array of
   // CategoryFormField (see lib/formSchema.ts). When someone uploads into
   // this category, the app renders these fields and requires them before
   // the upload can go through, so every doc carries the context (client,
   // date, competitor, region, whatever the manager configured) without
   // anyone having to chase the uploader for it later.
-  formSchema  Json     @default("[]")
-  createdBy   User     @relation(fields: [createdById], references: [id])
-  createdById String
-  createdAt   DateTime @default(now())
+  formSchema      Json     @default("[]")
+  // The one built-in category every team document sits in (lib/
+  // teamCategory.ts). Never listed or offered where categories are picked:
+  // global categories are for documents for everyone only.
+  isSystem        Boolean  @default(false)
+  createdBy       User     @relation(fields: [createdById], references: [id])
+  createdById     String
+  createdAt       DateTime @default(now())
 
-  documents   Document[]
+  documents Document[]
+  // Documents whose main category is elsewhere but which are also listed here.
+  extraDocuments DocumentCategory[]
 }
 
 model Document {
-  id               String     @id @default(uuid())
-  title            String
-  category         Category   @relation(fields: [categoryId], references: [id])
-  categoryId       String
-  docType          DocType
-  status           DocStatus  @default(pending_review)
-  tags             String[]   @default([])
+  id          String    @id @default(uuid())
+  title       String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  docType     DocType
+  status      DocStatus @default(pending_review)
+  tags        String[]  @default([])
   // Set instead of ever having a file/version — a document that just links
   // out to an externally-hosted file (Google Docs/Sheets/Slides, a public
   // CSV, etc.) rather than something uploaded into our own storage. Mutually
@@ -197,41 +316,65 @@ model Document {
   // currentVersionId stays null forever; every other docType implies this
   // is null. Still goes through the same review/publish workflow as a file
   // upload — only the storage/versioning mechanics are skipped.
-  externalUrl      String?
+  externalUrl String?
   // Answers to the uploading category's formSchema, keyed by field id —
   // e.g. {"client_name": "Acme Corp", "competitor": "Salesforce"}. This is
   // what lets someone opening the doc later get context (who it's for,
   // what it compares, when it applies) without tracking down the uploader.
-  metadata         Json       @default("{}")
+  metadata    Json      @default("{}")
 
-  owner            User       @relation("OwnedBy", fields: [ownerId], references: [id])
-  ownerId          String
-  uploadedBy       User       @relation("UploadedBy", fields: [uploadedById], references: [id])
-  uploadedById     String
+  // See DocVisibility. Defaults to "org" so every document that existed
+  // before team access keeps behaving exactly as it did.
+  visibility     DocVisibility          @default(org)
+  teamAccess     DocumentTeamAccess[]
+  globalRequests GlobalPublishRequest[]
+  // "Also show in": extra categories this document is listed under, besides
+  // its main category (categoryId), which alone decides its detail fields.
+  extraCategories DocumentCategory[]
+
+  // True when a manager published this directly from the upload form with
+  // "No review needed" instead of sending it through review (app/api/
+  // documents/route.ts). Shown as a "Review Bypassed" label wherever the
+  // document is shown. Cleared the next time the document is published
+  // through a normal review.
+  reviewBypassed Boolean @default(false)
+
+  // False makes the document preview only: nobody can download the file
+  // (app, share links), they can only view it in the protected viewer.
+  // Decided by the approving manager before publishing and editable later
+  // from the Manage tab. Restricted documents are always preview only,
+  // whatever this says (downloadsAllowed in lib/access.ts). Defaults true so
+  // every existing document keeps downloading exactly as before.
+  downloadable Boolean @default(true)
+
+  owner        User   @relation("OwnedBy", fields: [ownerId], references: [id])
+  ownerId      String
+  uploadedBy   User   @relation("UploadedBy", fields: [uploadedById], references: [id])
+  uploadedById String
 
   // Set when an uploader force-uploads past the duplicate-title/duplicate-
   // content warning on POST /api/documents rather than adding a new version
   // to the existing document — flags this as a probable duplicate rather
   // than silently allowing content to fork.
-  duplicateOfId    String?
-  duplicateOf      Document?  @relation("DocumentDuplicates", fields: [duplicateOfId], references: [id])
+  duplicateOfId        String?
+  duplicateOf          Document?  @relation("DocumentDuplicates", fields: [duplicateOfId], references: [id])
   duplicateFlaggedDocs Document[] @relation("DocumentDuplicates")
-  duplicateReason  String?
+  duplicateReason      String?
 
-  currentVersionId String?    @unique
+  currentVersionId String?          @unique
   currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
 
-  versions         DocumentVersion[] @relation("VersionsOfDoc")
-  reviewRequests   ReviewRequest[]
-  stalenessFlags   StalenessFlag[]
-  events           DocumentEvent[]
-  shareLink        ShareLink?
-  inlineComments   InlineComment[]
-  feedback         DocumentFeedback[]
+  versions       DocumentVersion[]  @relation("VersionsOfDoc")
+  reviewRequests ReviewRequest[]
+  stalenessFlags StalenessFlag[]
+  events         DocumentEvent[]
+  shareLink      ShareLink?
+  inlineComments InlineComment[]
+  feedback       DocumentFeedback[]
 
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  lastReviewedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastReviewedAt DateTime?
 
   // Manager-set override for when this document's review is next due —
   // set via "Extend Validity" (app/dashboard/documents/[id]/LifecycleActions.tsx),
@@ -239,14 +382,14 @@ model Document {
   // precedence over the computed lastReviewedAt + category.reviewCycleDays
   // whenever it's set, so an extension always means exactly what the
   // manager asked for, not just "reset the clock to today."
-  reviewDueAt      DateTime?
+  reviewDueAt DateTime?
 
   // A manager-set "permanent" flag — excludes this document from staleness
   // flagging (scripts/run-staleness-check.ts) and from the old-superseded-
   // version purge (scripts/run-retention-cleanup.ts), even past a year old.
   // For documents that are simply always current by nature (legal terms,
   // brand guidelines) and shouldn't cycle through re-review at all.
-  neverExpires     Boolean    @default(false)
+  neverExpires Boolean @default(false)
 
   // Whether any authenticated user (not just an assigned reviewer) can leave
   // highlight-and-comment feedback on this document (components/
@@ -256,7 +399,7 @@ model Document {
   // editable afterward outside of a fresh publish. Defaults closed so a
   // document never unexpectedly starts collecting feedback nobody opted
   // into.
-  feedbackEnabled  Boolean    @default(false)
+  feedbackEnabled Boolean @default(false)
 
   // Whether this document may be shared via a public "anyone with the link"
   // link at all (components/ShareModal.tsx / app/api/documents/[id]/
@@ -272,72 +415,73 @@ model Document {
   // default) so every document published before this flag existed keeps
   // working exactly as it did, sharing was unconditionally available for
   // any published document until now.
-  shareEnabled     Boolean    @default(true)
+  shareEnabled Boolean @default(true)
 
   // Why a manager pulled this back down — required at revoke time (see
   // app/api/documents/[id]/revoke/route.ts and RevokeButton.tsx), shown
   // alongside the document wherever revoked docs are visible
   // (app/dashboard/revoked/page.tsx, org-wide view-only browsing). Not
   // cleared on republish — stays as history of the last revocation.
-  revokeReason     String?
-  revokedAt        DateTime?
-  revokedBy        User?      @relation("RevokedBy", fields: [revokedById], references: [id])
-  revokedById      String?
+  revokeReason String?
+  revokedAt    DateTime?
+  revokedBy    User?     @relation("RevokedBy", fields: [revokedById], references: [id])
+  revokedById  String?
 
   // Soft-delete: DELETE /api/documents/:id sets these instead of removing
   // the row outright, so a manager/superadmin can restore within a 30-day
   // window (see app/admin/deleted/page.tsx and the restore route). Only
   // after that window does scripts/run-retention-cleanup.ts hard-delete it
   // (storage files + row) for good.
-  deletedAt        DateTime?
-  deletedBy        User?      @relation("DeletedBy", fields: [deletedById], references: [id])
-  deletedById      String?
+  deletedAt   DateTime?
+  deletedBy   User?     @relation("DeletedBy", fields: [deletedById], references: [id])
+  deletedById String?
 
   @@index([status])
   @@index([categoryId])
   @@index([deletedAt])
+  @@index([visibility])
 }
 
 model DocumentVersion {
-  id             String   @id @default(uuid())
-  document       Document @relation("VersionsOfDoc", fields: [documentId], references: [id])
-  documentId     String
-  versionNumber  Int
-  filePath       String   // storage key (MinIO / Supabase Storage)
-  originalFilename String @default("file")  // preserved for correct download filename/extension
-  fileSize       BigInt
-  checksum       String   // sha256, for integrity verification
-  changelog      String?
-  extractedText  String?  // parsed text for search indexing
+  id               String   @id @default(uuid())
+  document         Document @relation("VersionsOfDoc", fields: [documentId], references: [id])
+  documentId       String
+  versionNumber    Int
+  filePath         String // storage key (MinIO / Supabase Storage)
+  originalFilename String   @default("file") // preserved for correct download filename/extension
+  fileSize         BigInt
+  checksum         String // sha256, for integrity verification
+  changelog        String?
+  extractedText    String? // parsed text for search indexing
   // Storage key of a LibreOffice-converted PDF of this version (PPT/Excel
   // only) — generated at upload time so the preview modal can render it
   // through the existing accurate PDF viewer instead of an approximation.
   // Null if conversion wasn't applicable (already a PDF/video/etc.) or
   // failed (LibreOffice unavailable, unsupported content) — the preview
   // falls back gracefully when this is unset.
-  previewPdfPath String?
+  previewPdfPath   String?
 
-  uploadedBy     User     @relation(fields: [uploadedById], references: [id])
-  uploadedById   String
-  uploadedAt     DateTime @default(now())
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  uploadedById String
+  uploadedAt   DateTime @default(now())
 
-  isCurrentFor   Document? @relation("CurrentVersion")
+  isCurrentFor Document? @relation("CurrentVersion")
 
   @@unique([documentId, versionNumber])
 }
 
 model ReviewRequest {
-  id          String       @id @default(uuid())
-  document    Document     @relation(fields: [documentId], references: [id])
-  documentId  String
-  requestedBy User         @relation("RequestedBy", fields: [requestedById], references: [id])
+  id            String       @id @default(uuid())
+  document      Document     @relation(fields: [documentId], references: [id])
+  documentId    String
+  requestedBy   User         @relation("RequestedBy", fields: [requestedById], references: [id])
   requestedById String
-  reviewer    User         @relation("ReviewerFor", fields: [reviewerId], references: [id])
-  reviewerId  String
-  status      ReviewStatus @default(pending)
-  comments    String?
-  createdAt   DateTime     @default(now())
-  resolvedAt  DateTime?
+  reviewer      User         @relation("ReviewerFor", fields: [reviewerId], references: [id])
+  reviewerId    String
+  status        ReviewStatus @default(pending)
+  comments      String?
+  createdAt     DateTime     @default(now())
+  resolvedAt    DateTime?
 
   // Groups reviewers assigned together into one escalation "round", purely
   // for the review-history trail (app/dashboard/documents/[id]/ReviewActions.tsx)
@@ -346,7 +490,7 @@ model ReviewRequest {
   // reviewer assigned at upload time (or reassigned within that same round);
   // requesting a second/third opinion bumps to a new round with the newly
   // added reviewer(s), while earlier rounds' rows are untouched history.
-  roundNumber Int          @default(1)
+  roundNumber Int @default(1)
 
   inlineComments InlineComment[]
 
@@ -369,7 +513,7 @@ model DocumentEvent {
   documentId String
   user       User     @relation(fields: [userId], references: [id])
   userId     String
-  type       String   // "view" | "download"
+  type       String // "view" | "download"
   timestamp  DateTime @default(now())
 
   // Every real query filters by BOTH fields together (a document's own
@@ -380,18 +524,18 @@ model DocumentEvent {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  user       User     @relation(fields: [userId], references: [id])
-  userId     String
-  action     String   // upload | approve | reject | delete | download | login | role_change
-  documentId String?
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  action        String // upload | approve | reject | delete | download | login | role_change
+  documentId    String?
   // Snapshotted at the moment of the action, not looked up live — documentId
   // has no real FK (a document can later be deleted), and the whole point of
   // an audit trail is that "who deleted document X" still reads correctly
   // after X is gone.
   documentTitle String?
-  ipAddress  String?
-  timestamp  DateTime @default(now())
+  ipAddress     String?
+  timestamp     DateTime @default(now())
 
   @@index([userId])
   @@index([timestamp])
@@ -461,7 +605,7 @@ model Notification {
   id            String   @id @default(uuid())
   user          User     @relation(fields: [userId], references: [id])
   userId        String
-  type          String   // "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted"
+  type          String // "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted"
   title         String
   body          String?
   documentId    String?
@@ -550,44 +694,44 @@ enum FeedbackStatus {
 }
 
 model DocumentFeedback {
-  id              String   @id @default(uuid())
-  document        Document @relation(fields: [documentId], references: [id])
-  documentId      String
-  user            User     @relation("FeedbackAuthor", fields: [userId], references: [id])
-  userId          String
-  highlightedText String?
-  comment         String
-  createdAt       DateTime @default(now())
+  id                String          @id @default(uuid())
+  document          Document        @relation(fields: [documentId], references: [id])
+  documentId        String
+  user              User            @relation("FeedbackAuthor", fields: [userId], references: [id])
+  userId            String
+  highlightedText   String?
+  comment           String
+  createdAt         DateTime        @default(now())
   // Set when the comment's author or a moderating manager/superadmin edits
   // its text after it was added — null means never edited. See
   // InlineComment.editedAt's own comment for why this is tracked rather
   // than silently overwriting.
-  editedAt        DateTime?
+  editedAt          DateTime?
   // Triage state a manager or this document's own uploader can set from the
   // Manage tab (app/dashboard/documents/[id]/FeedbackManagement.tsx) —
   // "accepted" (acknowledged, will act on it) or "closed" (dismissed, no
   // action) — separate from deleting it outright, so the feedback stays
   // visible as a record either way. Defaults to open (untriaged).
-  status          FeedbackStatus @default(open)
+  status            FeedbackStatus  @default(open)
   // A short reply from whoever set the status above (the same manager or
   // uploader, not the feedback's own author) — "here's what we did/why",
   // shown alongside the status badge wherever the feedback itself is shown.
   // Optional: a status can be set with no note at all.
-  responseNote    String?
+  responseNote      String?
   // Who actually set the status above — shown as "Accepted by X (Role)"
   // wherever the status badge shows, so the author knows not just THAT it
   // was triaged but by whom (the document's contributor, or a manager/
   // reviewer). Null while status is still "open" (nobody's acted on it yet).
   statusChangedById String?
-  statusChangedBy   User?  @relation("FeedbackStatusChangedBy", fields: [statusChangedById], references: [id])
+  statusChangedBy   User?           @relation("FeedbackStatusChangedBy", fields: [statusChangedById], references: [id])
   // Optionally directs this feedback at a specific person already involved
   // with the document (its contributor, or one of its reviewers) — picked
   // at compose time (components/DocumentFeedback.tsx) from a list scoped to
   // just that document, not a free-text @mention of anyone. Null means
   // general feedback, nobody tagged.
-  taggedUserId    String?
-  taggedUser      User?  @relation("FeedbackTaggedUser", fields: [taggedUserId], references: [id])
-  replies         FeedbackReply[]
+  taggedUserId      String?
+  taggedUser        User?           @relation("FeedbackTaggedUser", fields: [taggedUserId], references: [id])
+  replies           FeedbackReply[]
   // Ready-to-render Round.Attempt label (e.g. "v1.1") for whichever version
   // was actually live/current on the document when this feedback was
   // posted — the SAME lib/versionRounds.ts computeRoundAttempts label the
@@ -600,7 +744,7 @@ model DocumentFeedback {
   // already computes this same label once, at the moment it's needed, for
   // its own notification. Null for feedback left before this field existed,
   // or on a document with no versions at all (docType "link").
-  versionLabel    String?
+  versionLabel      String?
 
   @@index([documentId])
 }
@@ -617,7 +761,7 @@ model DocumentFeedback {
 // first decision has actually been made (status is no longer "open") — see
 // the replies route's own enforcement of both.
 model FeedbackReply {
-  id         String   @id @default(uuid())
+  id         String           @id @default(uuid())
   // Cascade, not restrict — DocumentFeedback's own DELETE route (see
   // app/api/documents/[id]/feedback/[feedbackId]/route.ts) lets the author
   // or a moderator remove a feedback item outright at any time, replies and
@@ -626,10 +770,10 @@ model FeedbackReply {
   // tried.
   feedback   DocumentFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
   feedbackId String
-  author     User     @relation(fields: [authorId], references: [id])
+  author     User             @relation(fields: [authorId], references: [id])
   authorId   String
   comment    String
-  createdAt  DateTime @default(now())
+  createdAt  DateTime         @default(now())
   // Set once the reply's own author edits its text — same "(edited)" marker
   // convention as InlineComment.editedAt and DocumentFeedback.editedAt, not
   // offered to anyone else (a manager editing someone else's wording has no
@@ -655,4 +799,46 @@ model SavedFilter {
   createdAt DateTime @default(now())
 
   @@index([userId, section])
+}
+
+// A team manager asking for one of the team's restricted documents to become
+// visible to Everyone. Nobody inside a team can do that directly; the
+// Global approver (User.isGlobalApprover) decides, from My Work. Approving
+// switches the document to visibility "org"; sending it back leaves it with
+// its teams and records the approver's comment.
+enum GlobalRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+model GlobalPublishRequest {
+  id              String              @id @default(uuid())
+  document        Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId      String
+  requestedBy     User                @relation("GlobalRequestRaisedBy", fields: [requestedById], references: [id])
+  requestedById   String
+  reason          String
+  status          GlobalRequestStatus @default(pending)
+  decidedBy       User?               @relation("GlobalRequestDecidedBy", fields: [decidedById], references: [id])
+  decidedById     String?
+  decisionComment String?
+  createdAt       DateTime            @default(now())
+  decidedAt       DateTime?
+
+  @@index([status])
+  @@index([documentId])
+}
+
+// A document listed in a category other than its main one (Document.
+// categoryId). Changed from the document's Manage tab by whoever can edit its
+// details; no new review, since the file doesn't change.
+model DocumentCategory {
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String
+
+  @@id([documentId, categoryId])
+  @@index([categoryId])
 }

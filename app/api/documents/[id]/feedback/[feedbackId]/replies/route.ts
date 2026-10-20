@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { notifyFeedbackReplied, fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, passesTeamGate } from "@/lib/access";
 
 // POST /api/documents/:id/feedback/:feedbackId/replies — { comment }. A
 // follow-up message after the first accept/close decision (the PATCH route
@@ -17,6 +18,9 @@ export async function POST(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.documentFeedback.findUnique({
     where: { id: params.feedbackId },
@@ -26,7 +30,8 @@ export async function POST(
     return NextResponse.json({ error: "Comment not found." }, { status: 404 });
   }
 
-  const isManager = user.role === "manager" || user.role === "superadmin";
+  const docRole = await documentRoleById(user, params.id);
+  const isManager = docRole === "manager" || docRole === "superadmin";
   const canTriage = isManager || existing.document.uploadedById === user.id;
   if (!canTriage) {
     return NextResponse.json(

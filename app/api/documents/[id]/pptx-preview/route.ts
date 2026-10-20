@@ -4,6 +4,7 @@ import { getFileBuffer } from "@/lib/storage";
 import { extractPptxSlides } from "@/lib/pptxSlides";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { accessInclude, teamAllows, involvedInReview } from "@/lib/access";
 
 // GET /api/documents/:id/pptx-preview?version=3 — same access rules as
 // /preview (see that route), but returns a parsed slide structure (text +
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const [document, reviewRequests] = await Promise.all([
     prisma.document.findUniqueOrThrow({
       where: { id: params.id },
-      include: { currentVersion: true, versions: true },
+      include: { currentVersion: true, versions: true, ...accessInclude },
     }),
     prisma.reviewRequest.findMany({
       where: { documentId: params.id },
@@ -31,15 +32,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
   const approvedVersionIds = everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt);
   const hasEverPublished = document.currentVersionId !== null && approvedVersionIds.has(document.currentVersionId);
-  const isPubliclyVisible = hasEverPublished && document.status !== "archived";
+  const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
 
   // Uploader/owner/an assigned reviewer (any round)/superadmin, same
   // narrower rule as app/dashboard/documents/[id]/page.tsx's
   // canSeeUnpublishedDoc — a manager with no assignment on this document
   // can't preview its still-pending content early either.
   const canAccessUnpublished =
-    isPubliclyVisible ||
-    document.status === "revoked" ||
+    (isPubliclyVisible && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequests.some((r) => r.reviewerId === user.id) ||
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     : document.currentVersion;
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
-  if (user.role === "user" && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
+  if (!involvedInReview(user, document, reviewRequests) && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
     return NextResponse.json({ error: "Only published versions are available to preview." }, { status: 403 });
   }
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import BrandedLoader from "@/components/BrandedLoader";
+import InfoTooltip from "@/components/InfoTooltip";
 
 type Category = { id: string; name: string; reviewCycleDays: number | null };
 
@@ -33,10 +34,10 @@ export default function CategoryReviewCycles({ categories }: { categories: Categ
 
   return (
     <div className="rounded-ff border border-ff-border bg-white p-4 shadow-ff">
-      <h2 className="mb-1 text-base font-bold text-ff-text">Review cycles</h2>
-      <p className="mb-4 text-xs text-ff-textMuted">
-        How many days a published document in each category stays valid before it&apos;s flagged for re-review.
-      </p>
+      <h2 className="mb-4 flex items-center gap-1.5 text-base font-bold text-ff-text">
+        Review cycles
+        <InfoTooltip text="How many days a published document in each category stays valid before it's flagged for re-review." />
+      </h2>
       <div className="space-y-2">
         {categories.map((c) => (
           <div key={c.id} className="flex items-center gap-3 rounded-ff border border-ff-border p-2.5">

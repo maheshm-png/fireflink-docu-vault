@@ -4,17 +4,24 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
+import AlertModal from "@/components/AlertModal";
 
 export default function ArchiveButton({ documentId, archived }: { documentId: string; archived: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function toggle() {
     setBusy(true);
-    await fetch(`/api/documents/${documentId}/${archived ? "unarchive" : "archive"}`, { method: "POST" });
+    const res = await fetch(`/api/documents/${documentId}/${archived ? "unarchive" : "archive"}`, { method: "POST" });
     setBusy(false);
     setConfirming(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      setError(data?.error ?? (archived ? "Could not restore this document." : "Could not archive this document."));
+      return;
+    }
     router.refresh();
   }
 
@@ -22,8 +29,8 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
     <>
       <button
         onClick={() => setConfirming(true)}
-        title={archived ? "Unarchive" : "Archive"}
-        aria-label={archived ? "Unarchive" : "Archive"}
+        title={archived ? "Restore" : "Archive"}
+        aria-label={archived ? "Restore" : "Archive"}
         className="rounded-ff border border-ff-border p-2 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
       >
         {archived ? <ArchiveRestore className="h-4 w-4" aria-hidden /> : <Archive className="h-4 w-4" aria-hidden />}
@@ -34,8 +41,8 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
         title={archived ? "Restore this document?" : "Archive this document?"}
         message={
           archived
-            ? "It'll be sent back for re-approval before it's visible again."
-            : "It'll be retired to the Archived section and hidden from the public dashboard."
+            ? "It stays hidden until it's re-approved."
+            : "It'll be hidden from everyone. If it's published, everyone who could see it is told to stop using it. You can restore it later."
         }
         confirmLabel={archived ? "Yes, restore" : "Yes, archive"}
         danger={!archived}
@@ -43,6 +50,7 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
         onConfirm={toggle}
         onCancel={() => setConfirming(false)}
       />
+      <AlertModal message={error} onClose={() => setError(null)} title={archived ? "Couldn't restore" : "Couldn't archive"} />
     </>
   );
 }

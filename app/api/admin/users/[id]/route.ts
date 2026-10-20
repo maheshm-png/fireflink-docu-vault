@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, TeamRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import { getCurrentUser } from "@/lib/supabase";
 import { assertCan, type Role } from "@/lib/rbac";
@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const target = await prisma.user.findUniqueOrThrow({ where: { id: params.id } });
-  const { role, designationId, teamId, reportsToId, isActive, password } = await req.json();
+  const { role, teamIds, teamRoles, seesAllTeams, viewTeamIds, reportsToId, isActive, password } = await req.json();
   const data: Prisma.UserUncheckedUpdateInput = {};
 
   // Resets this user's Supabase Auth credential directly, same "set it
@@ -114,20 +114,82 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     data.isActive = isActive;
   }
 
-  if (designationId !== undefined) {
-    if (designationId !== null) {
-      const designation = await prisma.designation.findUnique({ where: { id: designationId } });
-      if (!designation) return NextResponse.json({ error: "That designation doesn't exist." }, { status: 400 });
+  // Team membership (UserTeam): the full list replaces the old one. It
+  // decides which restricted documents this person sees (lib/access.ts), so
+  // it's applied in a transaction and audited. Allowed on your own account,
+  // same as designation.
+  //
+  // teamRoles (optional, { [teamId]: "contributor" | "manager" }) sets what
+  // they may do inside each team. Everyone in a team can upload to it: view
+  // only is for leadership, never a team role, so "member" isn't accepted.
+  // Nothing is given by default: the admin picks the role for every team
+  // added, and a team already held keeps its role unless one is sent.
+  let teamsChanged = false;
+  if (teamIds !== undefined) {
+    if (!Array.isArray(teamIds) || teamIds.some((t) => typeof t !== "string" || !t)) {
+      return NextResponse.json({ error: "teamIds must be a list of team ids." }, { status: 400 });
     }
-    data.designationId = designationId;
+    const unique = [...new Set(teamIds as string[])];
+    const found = await prisma.team.count({ where: { id: { in: unique } } });
+    if (found !== unique.length) return NextResponse.json({ error: "One of those teams doesn't exist." }, { status: 400 });
+    const roles: Record<string, TeamRole> = {};
+    if (teamRoles !== undefined) {
+      if (typeof teamRoles !== "object" || teamRoles === null || Array.isArray(teamRoles)) {
+        return NextResponse.json({ error: "teamRoles must map team ids to roles." }, { status: 400 });
+      }
+      for (const [teamId, r] of Object.entries(teamRoles as Record<string, unknown>)) {
+        if (!unique.includes(teamId)) continue;
+        if (r !== "contributor" && r !== "manager") {
+          return NextResponse.json({ error: "A team role must be Contributor or Manager." }, { status: 400 });
+        }
+        roles[teamId] = r;
+      }
+    }
+    const before = await prisma.userTeam.findMany({ where: { userId: target.id }, select: { teamId: true, role: true } });
+    const missing = unique.filter((teamId) => !roles[teamId] && !before.some((m) => m.teamId === teamId));
+    if (missing.length > 0) {
+      return NextResponse.json({ error: "Pick a role (Contributor or Manager) for every team." }, { status: 400 });
+    }
+    await prisma.$transaction([
+      prisma.userTeam.deleteMany({ where: { userId: target.id, teamId: { notIn: unique } } }),
+      ...unique.map((teamId) =>
+        prisma.userTeam.upsert({
+          where: { userId_teamId: { userId: target.id, teamId } },
+          create: { userId: target.id, teamId, role: roles[teamId] },
+          update: roles[teamId] ? { role: roles[teamId] } : {},
+        })
+      ),
+    ]);
+    await logAudit({ userId: user.id, action: "team_membership_change", documentId: undefined });
+    if (before.some((m) => roles[m.teamId] && roles[m.teamId] !== m.role)) {
+      await logAudit({ userId: user.id, action: "team_role_change", documentId: undefined });
+    }
+    teamsChanged = true;
   }
 
-  if (teamId !== undefined) {
-    if (teamId !== null) {
-      const team = await prisma.team.findUnique({ where: { id: teamId } });
-      if (!team) return NextResponse.json({ error: "That team doesn't exist." }, { status: 400 });
+  // "Sees all teams" (lib/access.ts): view and comment on every team's
+  // documents. Sent with the team editor's save.
+  if (seesAllTeams !== undefined) {
+    if (typeof seesAllTeams !== "boolean") {
+      return NextResponse.json({ error: "seesAllTeams must be true or false." }, { status: 400 });
     }
-    data.teamId = teamId;
+    if (seesAllTeams !== target.seesAllTeams) data.seesAllTeams = seesAllTeams;
+  }
+  // Leadership view of selected teams only (UserViewTeam): replaces the list.
+  if (viewTeamIds !== undefined) {
+    if (!Array.isArray(viewTeamIds) || viewTeamIds.some((t) => typeof t !== "string")) {
+      return NextResponse.json({ error: "viewTeamIds must be a list of team ids." }, { status: 400 });
+    }
+    const unique = [...new Set(viewTeamIds as string[])];
+    if (unique.length && (await prisma.team.count({ where: { id: { in: unique } } })) !== unique.length) {
+      return NextResponse.json({ error: "One of those teams doesn't exist." }, { status: 400 });
+    }
+    await prisma.$transaction([
+      prisma.userViewTeam.deleteMany({ where: { userId: target.id } }),
+      prisma.userViewTeam.createMany({ data: unique.map((teamId) => ({ userId: target.id, teamId })) }),
+    ]);
+    await logAudit({ userId: user.id, action: "sees_all_teams_change", documentId: undefined });
+    teamsChanged = true;
   }
 
   if (reportsToId !== undefined) {
@@ -152,7 +214,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Supabase Auth call, not a Prisma field) — already applied by this
     // point, so this isn't actually "nothing to update," just nothing left
     // for Prisma to do.
-    if (passwordWasReset) {
+    if (passwordWasReset || teamsChanged) {
       return NextResponse.json({
         ok: true,
         role: target.role,
@@ -169,6 +231,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (data.role !== undefined) {
     await logAudit({ userId: user.id, action: "role_change", documentId: undefined });
+  }
+  if (data.seesAllTeams !== undefined) {
+    await logAudit({ userId: user.id, action: "sees_all_teams_change", documentId: undefined });
   }
   if (data.isActive !== undefined) {
     await logAudit({ userId: user.id, action: data.isActive ? "restore_user" : "remove_user", documentId: undefined });

@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 import { isFilterKey } from "@/lib/docFilters";
 
-const SECTION_PATTERN = /^(published:[\w-]+|review:(pending_review|rejected|archived)|revoked)$/;
+const SECTION_PATTERN = /^(published:[\w-]+|review:(pending_review|rejected|archived)|revoked|team:[\w-]+|mywork:(review|uploads|reviewed|all))$/;
 const MAX_PER_SECTION = 30;
 
 // POST /api/saved-filters: save the caller's current filter as a named

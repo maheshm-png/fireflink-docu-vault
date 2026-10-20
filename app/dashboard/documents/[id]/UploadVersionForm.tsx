@@ -1,8 +1,9 @@
 "use client";
 
+import { reviewersFor, type ReviewerOption } from "@/lib/reviewerOptions";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { FileUp } from "lucide-react";
 import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -29,9 +30,13 @@ const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 // reviewer in the previous round (see versions/route.ts), so a multi-
 // approver loop stays intact, rather than making the uploader re-pick
 // someone every time.
+type Reviewer = ReviewerOption;
+
 export default function UploadVersionForm({
   documentId,
   isRejected,
+  canBypassReview = false,
+  restrictedToTeamIds = null,
 }: {
   documentId: string;
   // Only a rejected document is being "replaced" (the rejected file is
@@ -39,6 +44,12 @@ export default function UploadVersionForm({
   // version on top of a document that's still live, so the label should
   // read as an addition, not a replacement.
   isRejected: boolean;
+  // Managers may publish the new version directly ("No review needed"),
+  // which labels the document Review Bypassed. Enforced server-side too.
+  canBypassReview?: boolean;
+  // Team ids of a restricted document (null for an org-wide one): limits the
+  // reviewer picker to managers of those teams.
+  restrictedToTeamIds?: string[] | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -47,6 +58,18 @@ export default function UploadVersionForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<{ documentId: string; title: string; reason: string } | null>(null);
+  const [bypassReview, setBypassReview] = useState(false);
+  // Filled only after the server answers needsReviewer: nobody from the last
+  // round can review this version (e.g. it was published without review).
+  const [reviewers, setReviewers] = useState<Reviewer[] | null>(null);
+  const [reviewerId, setReviewerId] = useState("");
+
+  async function loadReviewers() {
+    const data: Reviewer[] = await fetch("/api/reviewers").then((r) => r.json()).catch(() => []);
+    setReviewers(
+      reviewersFor(data, restrictedToTeamIds ? "restricted" : "org", restrictedToTeamIds ?? [])
+    );
+  }
 
   function reset() {
     setOpen(false);
@@ -54,6 +77,9 @@ export default function UploadVersionForm({
     setChangelog("");
     setError(null);
     setDuplicateWarning(null);
+    setBypassReview(false);
+    setReviewers(null);
+    setReviewerId("");
   }
 
   async function submitUpload(forceDuplicateOfId?: string) {
@@ -63,6 +89,8 @@ export default function UploadVersionForm({
     const form = new FormData();
     form.set("file", file);
     form.set("changelog", changelog);
+    if (bypassReview) form.set("bypassReview", "true");
+    else if (reviewerId) form.set("reviewerId", reviewerId);
     if (forceDuplicateOfId) {
       form.set("confirmDuplicate", "true");
       form.set("duplicateOfId", forceDuplicateOfId);
@@ -81,6 +109,7 @@ export default function UploadVersionForm({
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
+      if (data?.needsReviewer && reviewers === null) await loadReviewers();
       setError(data?.error ?? "Upload failed, please try again.");
       return;
     }
@@ -100,9 +129,12 @@ export default function UploadVersionForm({
       <button
         onClick={() => setOpen(true)}
         title={isRejected ? "Replace with a new version" : "Upload a new version"}
-        className="flex items-center gap-1.5 rounded-ff border border-ff-border px-3 py-2 text-sm text-ff-textMuted transition-colors hover:border-ff-accent/40 hover:bg-ff-accent/10 hover:text-ff-accent"
+        // Highlighted with the platform's primary button style (the same
+        // plum gradient as Upload Document / Approve), so it reads as the
+        // main next step while matching the rest of the app.
+        className="flex items-center gap-1.5 rounded-ff bg-ff-accent-gradient px-3 py-2 text-sm font-semibold text-white shadow-ff ring-2 ring-ff-accent/20 transition-all hover:shadow-ff-md hover:brightness-110"
       >
-        <RefreshCw className="h-4 w-4" aria-hidden />
+        <FileUp className="h-4 w-4" aria-hidden />
         {isRejected ? "Replace Document" : "Upload New Version"}
       </button>
 
@@ -151,6 +183,37 @@ export default function UploadVersionForm({
                 className="w-full rounded-ff border border-ff-border px-3 py-2 text-sm"
               />
             </div>
+
+            {canBypassReview && (
+              <label className="mb-4 flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={bypassReview} onChange={(e) => setBypassReview(e.target.checked)} />
+                <span>
+                  <span className="font-semibold text-ff-text">No review needed</span>
+                  <span className="block text-xs text-ff-textMuted">
+                    Publish this version directly. The document will carry a Review Bypassed label.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {!bypassReview && reviewers !== null && (
+              <div className="mb-4">
+                <label className="mb-1 block text-xs text-ff-textMuted">Reviewer</label>
+                <select
+                  required
+                  value={reviewerId}
+                  onChange={(e) => setReviewerId(e.target.value)}
+                  className="w-full rounded-ff border border-ff-border px-3 py-2 text-sm"
+                >
+                  <option value="" disabled>
+                    {reviewers.length === 0 ? "No eligible manager available" : "Choose a reviewer..."}
+                  </option>
+                  {reviewers.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {duplicateWarning && (
               <div className="mb-4 rounded-ff border border-ff-warning/40 bg-ff-warning/10 p-3 text-xs text-ff-text">
@@ -203,7 +266,13 @@ export default function UploadVersionForm({
                 disabled={submitting || !!duplicateWarning}
                 className="flex items-center justify-center rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105 disabled:opacity-60"
               >
-                {submitting ? <BrandedLoader size={16} variant="white" label="Uploading..." /> : "Submit for Review"}
+                {submitting ? (
+                  <BrandedLoader size={16} variant="white" label="Uploading..." />
+                ) : bypassReview ? (
+                  "Publish Now"
+                ) : (
+                  "Submit for Review"
+                )}
               </button>
             </div>
           </form>

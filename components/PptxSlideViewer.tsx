@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import BrandedLoader from "./BrandedLoader";
+import InfoTooltip from "./InfoTooltip";
 
 type TextRun = { text: string; bold: boolean; italic: boolean; underline: boolean; sizePt?: number; color?: string };
 type TextParagraph = { runs: TextRun[]; bullet: boolean; align?: "l" | "ctr" | "r" | "just" };
@@ -274,9 +275,9 @@ export default function PptxSlideViewer({
         </div>
       )}
 
-      <p className="max-w-md text-center text-xs text-ff-textMuted">
-        Approximate rendering, text formatting and images shown in position; animations, theme colors, tables,
-        charts, and complex effects aren&apos;t reproduced.
+      <p className="flex items-center gap-1 text-center text-xs text-ff-textMuted">
+        Approximate preview
+        <InfoTooltip text="Text, formatting and images are shown in position. Animations, theme colors, tables, charts and complex effects aren't reproduced." />
       </p>
     </div>
   );

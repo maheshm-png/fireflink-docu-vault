@@ -8,3 +8,6 @@ node_modules
 .eslintcache
 Thumbs.db
 .DS_Store
+
+# Local env backups (hold real secrets)
+.env.before-*

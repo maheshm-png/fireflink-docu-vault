@@ -54,6 +54,13 @@ const EVENT_TAG: Record<Exclude<RoundAttemptEvent, "attempt">, string> = {
 // app/api/documents/[id]/review/route.ts. That's a real status change (their
 // row really is closed out and no longer actionable) but not a decision
 // THEY made, so it shouldn't read as if they personally rejected it.
+// A "No review needed" publish is stored as an approval by the uploading
+// manager with this note (app/api/documents/route.ts): shown as "Published
+// without review", never as an approval.
+function isBypass(r: { status: string; comments: string | null }) {
+  return r.status === "approved" && (r.comments?.startsWith("Review bypassed:") ?? false);
+}
+
 function isAutoClosed(r: { status: string; comments: string | null }) {
   return r.status === "rejected" && (r.comments?.startsWith("Auto-closed:") ?? false);
 }
@@ -264,10 +271,13 @@ export default function ReviewTrail({
     : roundSteps;
   const roundsAfterRevoke = revoked ? roundSteps.filter((s) => !roundsBeforeRevoke.includes(s)) : [];
 
-  // A revoked document was published first — the trail should still read
-  // that way (Published, done) rather than jumping straight to a warning.
+  // A document restored from the archive ("revoked", shown as Back in
+  // review) or archived was published first, so the trail still reads
+  // Published, done, before the step that took it down. An archived document
+  // that never got approved has nothing to show as published.
+  const everPublished = roundSteps.some((s) => s.stage === "done");
   const finalStage: Stage =
-    documentStatus === "published" || documentStatus === "revoked"
+    documentStatus === "published" || documentStatus === "revoked" || (documentStatus === "archived" && everPublished)
       ? "done"
       : documentStatus === "rejected"
       ? "rejected"
@@ -294,9 +304,9 @@ export default function ReviewTrail({
           {
             key: "revoked",
             stage: "revoked" as Stage,
-            label: "Revoked",
+            label: "Restored from archive",
             tooltip: [
-              `Revoked${revoked?.byName ? ` by ${revoked.byName}` : ""}`,
+              `Archived, then sent back for review${revoked?.byName ? ` by ${revoked.byName}` : ""}`,
               mounted && revoked?.at ? formatDateTime(revoked.at) : null,
               revoked?.reason,
             ]
@@ -306,6 +316,9 @@ export default function ReviewTrail({
         ]
       : []),
     ...roundsAfterRevoke,
+    ...(documentStatus === "archived"
+      ? [{ key: "archived", stage: "closed" as Stage, label: "Archived", tooltip: "Taken out of circulation. A manager can restore it." }]
+      : []),
   ];
 
   const detailSteps = attemptBlocks.filter((s) => s.rows && s.rows.length > 0);
@@ -553,20 +566,22 @@ export default function ReviewTrail({
                       </span>
                     ) : (
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${
-                          r.status === "approved"
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${isBypass(r) ? "" : "capitalize"} ${
+                          isBypass(r)
+                            ? "bg-ff-warning/15 text-ff-warning"
+                            : r.status === "approved"
                             ? "bg-ff-success/15 text-ff-success"
                             : r.status === "rejected"
                             ? "bg-ff-danger/15 text-ff-danger"
                             : "bg-ff-warning/15 text-ff-warning"
                         }`}
                       >
-                        {r.status}
+                        {isBypass(r) ? "Published without review" : r.status}
                       </span>
                     )}
                   </div>
                   <p className="mt-0.5 text-[11px] text-ff-textMuted">
-                    assigned by {r.requestedBy.name}
+                    {isBypass(r) ? "no reviewer" : <>assigned by {r.requestedBy.name}</>}
                     {mounted && (
                       <>
                         {" "}
@@ -575,7 +590,7 @@ export default function ReviewTrail({
                     )}
                   </p>
 
-                  {!isAutoClosed(r) && r.comments && (
+                  {!isAutoClosed(r) && !isBypass(r) && r.comments && (
                     <p className={`mt-2 rounded-ff border-l-[3px] bg-ff-lavender/40 px-3 py-2 text-sm text-ff-text ${notePillClass}`}>
                       {r.comments}
                     </p>

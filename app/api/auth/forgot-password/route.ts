@@ -22,7 +22,10 @@ function hashCode(code: string) {
 // reported explicitly instead of silently no-op'ing behind a generic
 // message).
 export async function POST(req: NextRequest) {
-  const { email } = await req.json();
+  const body = await req.json();
+  // Stored emails are lowercase; a stray space or capital (common on phones)
+  // must still find the account.
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
   const genericResponse = () =>
     NextResponse.json({
       message: "If that email belongs to an account, a verification code has been sent.",

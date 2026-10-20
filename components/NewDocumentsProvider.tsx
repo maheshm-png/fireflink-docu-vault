@@ -36,11 +36,14 @@ export function NewDocumentsProvider({
   initialDocumentIds = [],
   initialCategoryIds = [],
   initialRecentDocs = [],
+  scopeQuery = "",
   children,
 }: {
   initialDocumentIds?: string[];
   initialCategoryIds?: string[];
   initialRecentDocs?: { id: string; title: string }[];
+  // Which Home section this is for (lib/newDocuments.ts), e.g. "scope=team&team=<id>".
+  scopeQuery?: string;
   children: React.ReactNode;
 }) {
   const [state, setState] = useState<NewDocumentsState>({
@@ -54,7 +57,7 @@ export function NewDocumentsProvider({
 
     async function poll() {
       try {
-        const res = await fetch("/api/notifications/new-documents");
+        const res = await fetch(`/api/notifications/new-documents${scopeQuery ? `?${scopeQuery}` : ""}`);
         if (!res.ok || cancelled) return;
         const data: { documentIds: string[]; categoryIds: string[]; recentDocs: { id: string; title: string }[] } =
           await res.json();
@@ -84,7 +87,7 @@ export function NewDocumentsProvider({
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", poll);
     };
-  }, []);
+  }, [scopeQuery]);
 
   return <NewDocumentsContext.Provider value={state}>{children}</NewDocumentsContext.Provider>;
 }

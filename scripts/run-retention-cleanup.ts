@@ -25,18 +25,22 @@ import { purgeDocument } from "../lib/purgeDocument";
 import { getAppSettings } from "../lib/settings";
 import { computeRoundAttempts } from "../lib/versionRounds";
 
+const RESTRICTED_TITLE = "(a restricted document)";
+
 async function purgeExpiredDeletedDocuments(retentionDays: number) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
   const docs = await prisma.document.findMany({
     where: { deletedAt: { lte: cutoff } },
-    select: { id: true, title: true },
+    select: { id: true, title: true, visibility: true },
   });
 
   const purged: { title: string }[] = [];
 
   for (const doc of docs) {
     await purgeDocument(doc.id);
-    purged.push({ title: doc.title });
+    // The alert goes to the shared manager Chat space, so a restricted
+    // document's title is withheld there (lib/access.ts).
+    purged.push({ title: doc.visibility === "restricted" ? RESTRICTED_TITLE : doc.title });
   }
 
   return purged;
@@ -84,7 +88,10 @@ async function purgeOldSupersededVersions(retentionDays: number) {
       }
     }
     await prisma.documentVersion.delete({ where: { id: version.id } });
-    purged.push({ documentTitle: version.document.title, versionLabel });
+    purged.push({
+      documentTitle: version.document.visibility === "restricted" ? RESTRICTED_TITLE : version.document.title,
+      versionLabel,
+    });
   }
 
   return purged;

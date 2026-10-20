@@ -1,6 +1,22 @@
 import { notifyGChat, notifyGChatManager } from "./gchat";
 import { createNotifications } from "./notifications";
 import { sendEmail } from "./email";
+import { isRestrictedDocument } from "./access";
+import { prisma } from "./prisma";
+
+// Who a published document reached, so every notice says it plainly:
+// "Everyone", or "the Sales team" / "the Sales and Presales teams".
+async function audienceOf(documentId: string): Promise<{ everyone: boolean; label: string }> {
+  const doc = await prisma.document.findUnique({
+    where: { id: documentId },
+    select: { visibility: true, teamAccess: { select: { team: { select: { name: true } } } } },
+  });
+  if (!doc || doc.visibility !== "restricted") return { everyone: true, label: "Everyone" };
+  const names = doc.teamAccess.map((a) => a.team.name).sort();
+  if (names.length === 0) return { everyone: false, label: "your team" };
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return { everyone: false, label: `the ${list} team${names.length > 1 ? "s" : ""}` };
+}
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -25,13 +41,26 @@ export function fireNotification(promise: Promise<unknown>) {
   promise.catch((err) => console.error("Notification failed:", err));
 }
 
+// Both Google Chat spaces are shared, so a restricted document's title and
+// details never go there (lib/access.ts). Every GChat post about a specific
+// document goes through one of these two; the in-app bell and email, which
+// reach only specific people, are unaffected.
+async function postToTeamSpace(documentId: string, text: string) {
+  if (await isRestrictedDocument(documentId)) return;
+  await notifyGChat(text);
+}
+async function postToManagerSpace(documentId: string, text: string) {
+  if (await isRestrictedDocument(documentId)) return;
+  await notifyGChatManager(text);
+}
+
 /**
  * Notification policy (deliberately narrow): only three events reach the
  * team-wide Google Chat space —
  *   1. A document is published (notifyDocumentPublished)
  *   2. A document is flagged as outdated and needs a manager's review
  *      (notifyDocumentFlaggedStale)
- *   3. A document is revoked (notifyDocumentRevoked)
+ *   3. A published document is archived (notifyDocumentRevoked)
  * Routine per-step status (a fresh upload awaiting its first review, a new
  * version awaiting re-review) intentionally sends nothing — reviewers check
  * the Pending Review page instead — so the shared channel stays low-noise.
@@ -59,7 +88,8 @@ export async function notifyReviewDecision(params: {
   comments?: string;
   inlineComments?: { highlightedText: string | null; comment: string }[];
 }) {
-  const verb = params.decision === "approved" ? "was approved and is now live" : "was sent back with feedback";
+  const audience = await audienceOf(params.documentId);
+  const verb = params.decision === "approved" ? `was approved and is now live for ${audience.label}` : "was sent back with feedback";
   const lines = [
     `${params.uploaderName}'s submission "${params.documentTitle}" ${verb}.`,
   ];
@@ -73,7 +103,7 @@ export async function notifyReviewDecision(params: {
     );
   }
   lines.push(`View: ${APP_URL}/dashboard/documents/${params.documentId}`);
-  await notifyGChat(lines.join("\n"));
+  await postToTeamSpace(params.documentId, lines.join("\n"));
 
   // The in-app bell entry this was previously missing entirely — a
   // contributor whose upload was approved or rejected got an email and a
@@ -84,16 +114,23 @@ export async function notifyReviewDecision(params: {
       type: params.decision,
       title:
         params.decision === "approved"
-          ? `Approved and published: ${params.documentTitle}`
+          ? `Published to ${audience.label}: ${params.documentTitle}`
           : `Sent back with feedback: ${params.documentTitle}`,
-      body: params.comments,
+      body:
+        params.decision === "approved"
+          ? [audience.everyone ? "Everyone in FireFlink can see it now." : `Only ${audience.label} can see it.`, params.comments]
+              .filter(Boolean)
+              .join(" Reviewer: ")
+          : params.comments,
       documentId: params.documentId,
       documentTitle: params.documentTitle,
     },
   ]);
 
   const decisionText =
-    params.decision === "approved" ? "has been approved and is now published" : "has been returned for revision";
+    params.decision === "approved"
+      ? `has been approved and is now published for ${audience.label}`
+      : "has been returned for revision";
   const inlineCommentsHtml =
     params.inlineComments && params.inlineComments.length > 0
       ? `
@@ -134,15 +171,21 @@ export async function notifyDocumentPublished(params: {
   uploaderName: string;
   recipients: { id: string; name: string }[];
 }) {
-  await notifyGChat(
-    `New document published: "${params.documentTitle}" (${params.categoryName}), uploaded by ${params.uploaderName}. Please take a look.`
+  const audience = await audienceOf(params.documentId);
+  await postToTeamSpace(
+    params.documentId,
+    `New document published for ${audience.label}: "${params.documentTitle}" (${params.categoryName}), uploaded by ${params.uploaderName}. Please take a look.`
   );
   await createNotifications(
     params.recipients.map((r) => ({
       userId: r.id,
       type: "published" as const,
-      title: `New in ${params.categoryName}: ${params.documentTitle}`,
-      body: `Uploaded by ${params.uploaderName}`,
+      title: audience.everyone
+        ? `New for Everyone: ${params.documentTitle}`
+        : `New in ${audience.label}: ${params.documentTitle}`,
+      body: audience.everyone
+        ? `${params.categoryName} · uploaded by ${params.uploaderName}`
+        : `Team document · uploaded by ${params.uploaderName}`,
       documentId: params.documentId,
       documentTitle: params.documentTitle,
     }))
@@ -162,13 +205,15 @@ export async function notifyDocumentFlaggedStale(params: {
   documentId: string;
   reason: string;
 }) {
-  await notifyGChat(
+  await postToTeamSpace(
+    params.documentId,
     `"${params.documentTitle}" has been flagged as potentially outdated (${params.reason}). ${params.ownerName}, please review.`
   );
 }
 
 /**
- * A published document was pulled down by a manager. Broadcasts to the
+ * A published document was archived by a manager (app/api/documents/[id]/
+ * archive). Broadcasts to the
  * whole active team — anyone may already have a copy — with a plain
  * instruction not to use it, rather than the re-approval mechanics underneath.
  */
@@ -182,14 +227,15 @@ export async function notifyDocumentRevoked(params: {
   recipients: { id: string; name: string }[];
 }) {
   const versionSuffix = params.versionLabel ? ` (${params.versionLabel})` : "";
-  await notifyGChat(
-    `Document revoked: "${params.documentTitle}${versionSuffix}". Please do not use this document, if you have already downloaded a copy, discontinue its use immediately.`
+  await postToTeamSpace(
+    params.documentId,
+    `Document withdrawn: "${params.documentTitle}${versionSuffix}". Please do not use this document, if you have already downloaded a copy, discontinue its use immediately.`
   );
   await createNotifications(
     params.recipients.map((r) => ({
       userId: r.id,
       type: "revoked" as const,
-      title: `Document revoked: ${params.documentTitle}${versionSuffix}`,
+      title: `Document withdrawn: ${params.documentTitle}${versionSuffix}`,
       body: "Please don't use this document, discontinue use of any copy you've already downloaded.",
       documentId: params.documentId,
       documentTitle: params.documentTitle,
@@ -232,7 +278,8 @@ export async function notifyManagerReviewNeeded(params: {
   const submissionType = params.isNewVersion
     ? `A new version (${params.versionLabel})`
     : "A new document";
-  await notifyGChatManager(
+  await postToManagerSpace(
+    params.documentId,
     [
       "Action required: document pending review",
       "",
@@ -288,15 +335,22 @@ export async function notifyReviewerAssigned(params: {
   documentId: string;
   reviewerId: string;
   reviewerName: string;
+  reviewerEmail: string;
   assignedByName: string;
   reason: "reassigned" | "second_opinion";
 }) {
   const verb = params.reason === "reassigned" ? "reassigned this document to you" : "asked you for a second opinion on this document";
-  await notifyGChatManager(
+  // The GChat space is shared, so name the assignee instead of saying "you".
+  const spaceVerb =
+    params.reason === "reassigned"
+      ? `reassigned this document to ${params.reviewerName}`
+      : `asked ${params.reviewerName} for a second opinion on this document`;
+  await postToManagerSpace(
+    params.documentId,
     [
       "Action required: document review",
       "",
-      `${params.assignedByName} ${verb}.`,
+      `${params.assignedByName} ${spaceVerb}.`,
       `Title: "${params.documentTitle}"`,
       "",
       `Review it: ${APP_URL}/dashboard/documents/${params.documentId}`,
@@ -315,6 +369,20 @@ export async function notifyReviewerAssigned(params: {
       documentTitle: params.documentTitle,
     },
   ]);
+  await sendEmail({
+    to: params.reviewerEmail,
+    subject:
+      params.reason === "reassigned"
+        ? `Review Reassigned to You: ${params.documentTitle}`
+        : `Second Opinion Requested: ${params.documentTitle}`,
+    html: `
+      <p>Dear ${params.reviewerName},</p>
+      <p>${params.assignedByName} ${verb}.</p>
+      <p><strong>Title:</strong> ${params.documentTitle}</p>
+      <p>Please review the document using the link below.</p>
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review Document</a></p>
+    `,
+  });
 }
 
 /**
@@ -450,4 +518,122 @@ export async function notifyFeedbackTagged(params: {
       documentTitle: params.documentTitle,
     },
   ]);
+}
+
+
+// Someone with "Sees all teams" commented on a team document they don't belong to
+// (app/api/documents/[id]/feedback/route.ts). They can comment on any
+// team's document but not act on it, so the team's managers hear about it,
+// in-app and by email. Never Google Chat: the document is confidential.
+export async function notifySeesAllComment(params: {
+  documentTitle: string;
+  documentId: string;
+  authorName: string;
+  comment: string;
+  managers: { id: string; name: string; email: string }[];
+}) {
+  await createNotifications(
+    params.managers.map((m) => ({
+      userId: m.id,
+      type: "leadership_comment" as const,
+      title: `${params.authorName} (Sees all teams) commented on ${params.documentTitle}`,
+      body: params.comment,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    }))
+  );
+  await Promise.all(
+    params.managers.map((m) =>
+      sendEmail({
+        to: m.email,
+        subject: `Comment from outside the team: ${params.documentTitle}`,
+        html: `
+          <p>Dear ${m.name},</p>
+          <p>${params.authorName} (who sees all teams) commented on your team's document "<strong>${params.documentTitle}</strong>":</p>
+          <blockquote>${escapeHtml(params.comment)}</blockquote>
+          <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
+        `,
+      })
+    )
+  );
+}
+
+// A team manager raised a "Request for Everyone" (app/api/documents/[id]/
+// everyone-request/route.ts): the Global approver hears about it, in-app
+// and by email. Never Google Chat: the document is still confidential.
+export async function notifyEveryoneRequested(params: {
+  documentTitle: string;
+  documentId: string;
+  requestedByName: string;
+  reason: string;
+  approvers: { id: string; name: string; email: string }[];
+}) {
+  await createNotifications(
+    params.approvers.map((a) => ({
+      userId: a.id,
+      type: "everyone_requested" as const,
+      title: `Request for Everyone: ${params.documentTitle}`,
+      body: `${params.requestedByName}: ${params.reason}`,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    }))
+  );
+  await Promise.all(
+    params.approvers.map((a) =>
+      sendEmail({
+        to: a.email,
+        subject: `Request for Everyone: ${params.documentTitle}`,
+        html: `
+          <p>Dear ${a.name},</p>
+          <p>${params.requestedByName} asked for the team document "<strong>${params.documentTitle}</strong>" to be visible to everyone in the organization.</p>
+          <p>Reason: ${escapeHtml(params.reason)}</p>
+          <p>As the Global approver, you can approve it or send it back from My Work or the document's page.</p>
+          <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
+        `,
+      })
+    )
+  );
+}
+
+// The Global approver decided a "Request for Everyone": the manager who raised
+// it hears the outcome, in-app and by email.
+export async function notifyEveryoneDecided(params: {
+  documentTitle: string;
+  documentId: string;
+  approved: boolean;
+  decidedByName: string;
+  comment: string | null;
+  requester: { id: string; name: string; email: string };
+}) {
+  const verdict = params.approved ? "approved" : "sent back";
+  await createNotifications([
+    {
+      userId: params.requester.id,
+      type: params.approved ? "everyone_approved" : "everyone_sent_back",
+      title: params.approved
+        ? `Published to Everyone: ${params.documentTitle}`
+        : `Request for Everyone sent back: ${params.documentTitle}`,
+      body: params.approved
+        ? `${params.decidedByName} approved your Request for Everyone. Everyone in FireFlink can see it now.${params.comment ? ` Comment: ${params.comment}` : ""}`
+        : `It stays with its team.${params.comment ? ` ${params.decidedByName}: ${params.comment}` : ""}`,
+      documentId: params.documentId,
+      documentTitle: params.documentTitle,
+    },
+  ]);
+  await sendEmail({
+    to: params.requester.email,
+    subject: `Request for Everyone ${params.approved ? "Approved" : "Sent Back"}: ${params.documentTitle}`,
+    html: `
+      <p>Dear ${params.requester.name},</p>
+      <p>${params.decidedByName} ${verdict} your request to make "<strong>${params.documentTitle}</strong>" visible to everyone.${
+        params.approved ? " It is now visible to the whole organization." : " It stays visible to its teams only."
+      }</p>
+      ${params.comment ? `<p>Comment: ${escapeHtml(params.comment)}</p>` : ""}
+      <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
+    `,
+  });
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

@@ -76,7 +76,14 @@ ENV PORT=3000
 # - cron: only used by the separate `cron` compose service (same image,
 #   different entrypoint/command) that runs the scheduled maintenance
 #   scripts below — unused, harmless weight in the `app` service itself.
-RUN apt-get update -y && apt-get install -y --no-install-recommends \
+#
+# Packages are fetched over HTTPS: some networks' filters answer the plain
+# http:// Debian mirror with 403 Forbidden for individual packages (seen
+# for the crosextra fonts), which fails the whole build. ca-certificates
+# is installed first over http so the https switch can verify the mirror.
+RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update -y && apt-get install -y --no-install-recommends \
       libreoffice \
       openssl \
       fontconfig \

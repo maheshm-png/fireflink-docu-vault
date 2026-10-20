@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { indexDocument } from "@/lib/search";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, passesTeamGate } from "@/lib/access";
 
 // PATCH /api/documents/:id/lifecycle — manager-tier document-lifecycle
 // actions that don't fit the review/revoke/archive/delete verbs:
@@ -28,9 +29,13 @@ import { prisma } from "@/lib/prisma";
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
-    assertCan(user.role, "manageDocumentLifecycle");
+    // Team documents use the caller's team role (lib/access.ts documentRole).
+    assertCan(await documentRoleById(user, params.id), "manageDocumentLifecycle");
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }

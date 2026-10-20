@@ -8,7 +8,8 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
+  // Global categories only: the built-in team category is never offered.
+  const categories = await prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" } });
   return NextResponse.json(categories);
 }
 

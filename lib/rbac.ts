@@ -24,11 +24,10 @@ export const ROLE_LABELS: Record<Role, string> = {
  * single most surprising rule in the app, and nothing else states it. */
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   superadmin:
-    "Full administrative access: manage users and their roles, categories, settings, and announcements. Cannot approve, reject, or delete documents; that stays with Manager on purpose.",
-  manager:
-    "Full document control: upload, edit, approve or reject reviews, delete, archive, revoke, and restore documents. Also manages categories, settings, and announcements.",
-  contributor: "Can upload documents and edit their own uploads. Cannot approve reviews or delete documents.",
-  user: "View-only access to published documents.",
+    "Runs the app: people, teams, categories and settings. Sees every document. Doesn't approve or delete documents.",
+  manager: "Approves uploads for everyone, can publish their own uploads without review (labelled Review Bypassed), and manages the documents they uploaded or reviewed. Other managers' documents are view only unless they're added as a reviewer.",
+  contributor: "Uploads documents for everyone (a manager approves them) and edits their own uploads.",
+  user: "Views, searches and shares published documents.",
 };
 
 export const PERMISSIONS = {

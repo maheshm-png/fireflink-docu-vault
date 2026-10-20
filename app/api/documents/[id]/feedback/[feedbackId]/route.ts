@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { notifyFeedbackAccepted, fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
+import { documentRoleById, passesTeamGate } from "@/lib/access";
 
 // DELETE /api/documents/:id/feedback/:feedbackId — the comment's own author
 // can always remove it, and a manager/superadmin can additionally moderate
@@ -16,13 +17,17 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.documentFeedback.findUnique({ where: { id: params.feedbackId } });
   if (!existing || existing.documentId !== params.id) {
     return NextResponse.json({ error: "Comment not found." }, { status: 404 });
   }
 
-  const canModerate = user.role === "manager" || user.role === "superadmin";
+  const docRole = await documentRoleById(user, params.id);
+  const canModerate = docRole === "manager" || docRole === "superadmin";
   if (existing.userId !== user.id && !canModerate) {
     return NextResponse.json({ error: "You can only delete your own comments." }, { status: 403 });
   }
@@ -55,6 +60,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const existing = await prisma.documentFeedback.findUnique({
     where: { id: params.feedbackId },
@@ -64,7 +72,8 @@ export async function PATCH(
     return NextResponse.json({ error: "Comment not found." }, { status: 404 });
   }
 
-  const isManager = user.role === "manager" || user.role === "superadmin";
+  const docRole = await documentRoleById(user, params.id);
+  const isManager = docRole === "manager" || docRole === "superadmin";
   const body = await req.json();
   const data: {
     comment?: string;

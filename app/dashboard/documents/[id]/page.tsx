@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronLeft, Ban } from "lucide-react";
+import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronLeft, Ban, EyeOff } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
 import { can, type Role } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
@@ -8,6 +8,27 @@ import Footer from "@/components/Footer";
 import DocTypeIcon from "@/components/DocTypeIcon";
 import Badge from "@/components/Badge";
 import { prisma } from "@/lib/prisma";
+import {
+  canChangeAccess,
+  canChangeDownloads,
+  canRequestEveryone,
+  canReviewDocument,
+  documentRole,
+  downloadsAllowed,
+  involvedInReview,
+  isSeesAllOutsider,
+  canBypassReviewFor,
+  canManageFolders,
+  sharingAllowed,
+  decidesEveryoneRequests,
+  managesDocumentTeam,
+  teamAllows,
+  uploadableTeamIds,
+} from "@/lib/access";
+import EveryoneRequestPanel from "@/components/EveryoneRequestPanel";
+import AccessBadges from "@/components/AccessBadges";
+import DownloadSettings from "@/components/DownloadSettings";
+import DocumentFolderSettings from "@/components/DocumentFolderSettings";
 import ReviewActions from "./ReviewActions";
 import UndoApprovalButton from "./UndoApprovalButton";
 import ReviewTrailWithHighlights from "./ReviewTrailWithHighlights";
@@ -15,7 +36,6 @@ import VersionDiff from "./VersionDiff";
 import VersionCompareFrame from "./VersionCompareFrame";
 import EditDocumentForm from "./EditDocumentForm";
 import UploadVersionForm from "./UploadVersionForm";
-import RevokeButton from "./RevokeButton";
 import DeleteButton from "./DeleteButton";
 import ArchiveButton from "./ArchiveButton";
 import RestoreButton from "@/app/admin/deleted/RestoreButton";
@@ -29,7 +49,9 @@ import DocumentPreview from "@/components/DocumentPreview";
 import DownloadMenu from "@/components/DownloadMenu";
 import ShareModal from "@/components/ShareModal";
 import ShareSettings from "@/components/ShareSettings";
+import AccessSettings from "@/components/AccessSettings";
 import ReviewHistoryModal from "@/components/ReviewHistoryModal";
+import InfoTooltip from "@/components/InfoTooltip";
 import InlineCommentReview from "@/components/InlineCommentReview";
 import DocumentFeedback from "@/components/DocumentFeedback";
 import { LocalDateTime } from "@/components/LocalDateTime";
@@ -63,6 +85,14 @@ export default async function DocumentDetailPage({
         versions: { orderBy: { versionNumber: "desc" }, include: { uploadedBy: true } },
         stalenessFlags: { where: { resolved: false } },
         duplicateOf: true,
+        teamAccess: { select: { teamId: true, folderId: true, grantedById: true, team: { select: { name: true } } } },
+        extraCategories: { select: { categoryId: true, category: { select: { name: true } } } },
+        // The latest "Request for Everyone" (pending, or the last decision).
+        globalRequests: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          include: { requestedBy: { select: { name: true } }, decidedBy: { select: { name: true } } },
+        },
       },
     }),
     // Opening a document this user was notified about (the bell, and the
@@ -90,6 +120,23 @@ export default async function DocumentDetailPage({
   // DELETE /api/documents/:id), so an old link or open tab lands here.
   if (!document) notFound();
 
+  // Team access control (lib/access.ts): a restricted document outside this
+  // user's teams is a plain 404, as if it didn't exist, unless they're one
+  // of its stakeholders (uploader, owner, a reviewer on any round).
+  // The Global approver also gets in while a "Request for Everyone" waits
+  // on a decision (lib/access.ts documentAccessWhere).
+  const latestEveryoneRequest = document.globalRequests[0] ?? null;
+  const pendingEveryoneRequest = latestEveryoneRequest?.status === "pending" ? latestEveryoneRequest : null;
+  if (
+    !teamAllows(user, document) &&
+    document.uploadedById !== user.id &&
+    document.ownerId !== user.id &&
+    !reviewRequests.some((r) => r.reviewerId === user.id) &&
+    !(decidesEveryoneRequests(user) && pendingEveryoneRequest)
+  ) {
+    notFound();
+  }
+
   // Deleted documents are only reachable by manager/superadmin (to decide
   // whether to restore them) — everyone else, including a direct link,
   // bounces to the dashboard as if the document doesn't exist.
@@ -97,6 +144,11 @@ export default async function DocumentDetailPage({
     redirect("/dashboard");
   }
   const isDeleted = Boolean(document.deletedAt);
+  // What this user may do to THIS document: their org role for an Everyone
+  // document, their team role for a team document (lib/access.ts).
+  // documentRole's manager rule needs who reviewed it (lib/access.ts).
+  const stakeDoc = { ...document, reviewRequests };
+  const docRole = documentRole(user, stakeDoc);
   // "Do they have a real stake in this document at all" — the page-ACCESS
   // gate below reuses this raw check directly, and every other
   // stakeholder-gated boolean on this page is built from it too. One
@@ -105,8 +157,8 @@ export default async function DocumentDetailPage({
   const isStakeholder =
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
-    user.role === "manager" ||
-    user.role === "superadmin";
+    docRole === "manager" ||
+    docRole === "superadmin";
   // Whether this specific person has ever actually been assigned to review
   // this document (any round, any status) — narrower than isStakeholder's
   // blanket "any manager," and shared by both the visibility gate and the
@@ -168,11 +220,18 @@ export default async function DocumentDetailPage({
   // while its raw status is literally "published" this instant, so it
   // needs that computed answer rather than the raw status field.
 
+  // Holding the assignment is enough to see the panel; deciding also needs
+  // canReviewDocument (lib/access.ts). Someone assigned before team roles
+  // who no longer qualifies can still reassign it (decideBlockedReason).
   const canReview =
     !isDeleted &&
-    can(user.role, "approveReview") &&
     (document.status === "pending_review" || document.status === "revoked") &&
     Boolean(myPendingReview);
+  const decideBlockedReason = canReviewDocument(user, document)
+    ? null
+    : document.visibility === "restricted"
+      ? "Only a manager of this document's team can approve or reject it. Reassign it to one of them."
+      : "Only a manager can approve or reject this document. Reassign it to one.";
 
   // Lets a reviewer undo their own already-recorded approval while the
   // document is still sitting in pending_review — i.e. before it actually
@@ -188,18 +247,18 @@ export default async function DocumentDetailPage({
   const myApprovedReview = reviewRequests.find((r) => r.reviewerId === user.id && r.status === "approved");
   const canUndoApproval =
     !isDeleted &&
-    can(user.role, "approveReview") &&
+    canReviewDocument(user, document) &&
     document.status === "pending_review" &&
     Boolean(myApprovedReview) &&
     !myPendingReview;
 
   const canEdit =
     !isDeleted &&
-    can(user.role, "editOwnUpload") &&
+    can(docRole, "editOwnUpload") &&
     (document.uploadedById === user.id ||
       document.ownerId === user.id ||
-      user.role === "manager" ||
-      user.role === "superadmin");
+      docRole === "manager" ||
+      docRole === "superadmin");
 
   // Replacing the file (UploadVersionForm) is narrower than editing the
   // rest of the document (canEdit above) once a document's been rejected —
@@ -215,15 +274,13 @@ export default async function DocumentDetailPage({
   const canUploadVersion =
     !isDeleted &&
     document.status !== "pending_review" &&
-    can(user.role, "editOwnUpload") &&
+    can(docRole, "editOwnUpload") &&
     (document.status === "rejected"
       ? latestVersion?.uploadedById === user.id
       : document.uploadedById === user.id ||
         document.ownerId === user.id ||
-        user.role === "manager" ||
-        user.role === "superadmin");
-
-  const canRevoke = !isDeleted && can(user.role, "revokeDocument") && document.status === "published";
+        docRole === "manager" ||
+        docRole === "superadmin");
 
   // Once a document has been approved by SOME manager, a manager who was
   // never actually part of that decision (never assigned as a reviewer on
@@ -237,7 +294,7 @@ export default async function DocumentDetailPage({
 
   const canDelete =
     !isDeleted &&
-    ((can(user.role, "deleteDocument") && (!everApproved || inReviewCycle)) ||
+    ((can(docRole, "deleteDocument") && (!everApproved || inReviewCycle)) ||
       (document.status === "pending_review" && document.uploadedById === user.id));
   // Same rule as isWithdrawalBeforeReview (lib/purgeDocument.ts), which the
   // DELETE route uses to purge instead of soft-delete: tells the button to
@@ -250,11 +307,11 @@ export default async function DocumentDetailPage({
 
   const canArchive =
     !isDeleted &&
-    can(user.role, "archiveDocument") &&
+    can(docRole, "archiveDocument") &&
     (document.status === "published" || document.status === "rejected" || document.status === "revoked");
-  const canUnarchive = !isDeleted && can(user.role, "archiveDocument") && document.status === "archived";
-  const canRestore = isDeleted && can(user.role, "restoreDocument");
-  const canManageLifecycle = !isDeleted && can(user.role, "manageDocumentLifecycle");
+  const canUnarchive = !isDeleted && can(docRole, "archiveDocument") && document.status === "archived";
+  const canRestore = isDeleted && can(docRole, "restoreDocument");
+  const canManageLifecycle = !isDeleted && can(docRole, "manageDocumentLifecycle");
 
   // A rejected (or still mid-review) version was never actually published —
   // "Set as current" can only ever roll back/forward to a version that
@@ -313,7 +370,9 @@ export default async function DocumentDetailPage({
         if (!r.resolvedAt) return latest;
         return !latest || r.resolvedAt > latest ? r.resolvedAt : latest;
       }, null);
-      return { versionId: v.id, label: versionLabel(v.id, v.versionNumber), reviewerNames, approvedAt };
+      // Published with "No review needed": not an approval by anyone else.
+      const bypassed = approvals.length > 0 && approvals.every((r) => r.comments?.startsWith("Review bypassed:"));
+      return { versionId: v.id, label: versionLabel(v.id, v.versionNumber), reviewerNames, approvedAt, bypassed };
     });
 
   // document.currentVersionId can be stale on a document created before
@@ -402,13 +461,65 @@ export default async function DocumentDetailPage({
   // collection on/off and triage individual items even after publish — see
   // FeedbackManagement.tsx and the routes it calls.
   const canManageFeedback =
-    document.uploadedById === user.id || user.role === "manager" || user.role === "superadmin";
+    document.uploadedById === user.id || docRole === "manager" || docRole === "superadmin";
 
   // Same permission as canManageFeedback above, kept as its own named flag
   // since it gates a different feature (components/ShareSettings.tsx) —
   // see Document.shareEnabled's own schema comment.
   const canManageSharing =
-    document.uploadedById === user.id || user.role === "manager" || user.role === "superadmin";
+    document.uploadedById === user.id || docRole === "manager" || docRole === "superadmin";
+
+  // Team access control (lib/access.ts). canChangeAccess mirrors PATCH
+  // /api/documents/[id]/access exactly; teamOptions are the teams this
+  // viewer may tick (theirs, or all for a superadmin) plus any
+  // already on the document, shown locked when they aren't in it.
+  const canEditAccess = !isDeleted && canChangeAccess(user, stakeDoc, "restricted");
+  // Downloads turned off: preview only, for everyone.
+  const previewOnly = !downloadsAllowed(document);
+  const canEditDownloads = !isDeleted && canChangeDownloads(user, stakeDoc) && Boolean(document.currentVersionId);
+  const canOpenToOrg = canChangeAccess(user, stakeDoc, "org");
+  // Superadmins and the document's team managers (extending it to other
+  // teams) may add any team; anyone else only teams they contribute to. A
+  // team already on the document may only be removed by someone in it, or by
+  // whoever added it (undoing a mistake).
+  const extendsToAnyTeam = user.role === "superadmin" || managesDocumentTeam(user, document);
+  const addableTeamIds = uploadableTeamIds(user);
+  const currentAccessTeamIds = document.teamAccess.map((a) => a.teamId);
+  const teamOptions = canEditAccess
+    ? (
+        await prisma.team.findMany({
+          where: extendsToAnyTeam || !addableTeamIds ? {} : { id: { in: [...addableTeamIds, ...currentAccessTeamIds] } },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        })
+      ).map((t) => ({
+        ...t,
+        selectable: currentAccessTeamIds.includes(t.id)
+          ? user.role === "superadmin" ||
+            user.teamIds.includes(t.id) ||
+            document.teamAccess.some((a) => a.teamId === t.id && a.grantedById === user.id)
+          : extendsToAnyTeam || !addableTeamIds || addableTeamIds.includes(t.id),
+      }))
+    : [];
+  // "Request for Everyone": team managers raise it from the Manage tab once
+  // the document is published; the Global approver decides it above the tabs.
+  const showEveryoneRequest = !isDeleted && document.status === "published" && canRequestEveryone(user, document);
+  const showEveryoneDecision =
+    !isDeleted && decidesEveryoneRequests(user) && Boolean(pendingEveryoneRequest) && pendingEveryoneRequest?.requestedById !== user.id;
+  // Shown to the team manager before they send a Request for Everyone.
+  const globalApproverName = showEveryoneRequest
+    ? (await prisma.user.findFirst({ where: { isGlobalApprover: true, role: "manager", isActive: true }, select: { name: true } }))?.name ?? null
+    : null;
+  const everyonePending = pendingEveryoneRequest
+    ? {
+        requestedByName: pendingEveryoneRequest.requestedBy.name,
+        reason: pendingEveryoneRequest.reason,
+        createdAt: pendingEveryoneRequest.createdAt.toISOString(),
+      }
+    : null;
+  // Someone who "Sees all teams" may comment on any team's document, even
+  // with feedback off.
+  const leadershipComment = isSeesAllOutsider(user, document);
 
   const reviewDueAt = computeReviewDueDate(document, document.category.reviewCycleDays);
   const reviewDueInDays = document.neverExpires
@@ -428,6 +539,12 @@ export default async function DocumentDetailPage({
   const showPurgeCountdown = daysUntilPurge !== null && daysUntilPurge <= 20;
 
   const fields = (document.category.formSchema as unknown as CategoryFormField[]) ?? [];
+  // For the edit form's category picker (main category + "Also show in").
+  // Team documents have no category to change (lib/teamCategory.ts).
+  const allCategories =
+    canEdit && document.visibility !== "restricted"
+      ? await prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" }, select: { id: true, name: true, formSchema: true } })
+      : [];
   const metadata = (document.metadata as Record<string, unknown>) ?? {};
 
   // Same visibility conditions the old flat layout used for each section —
@@ -440,6 +557,14 @@ export default async function DocumentDetailPage({
     document.versions.length > 0 &&
     (canSeeReviewTrail || Boolean(myPendingReview));
   const reviewActionsVisible = canReview && Boolean(myPendingReview);
+  // The approving manager may restrict the document to ANY team (the review
+  // route's checkAccessChange asApprover), so every team is offered.
+  const approvalTeamOptions = reviewActionsVisible
+    ? (await prisma.team.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })).map((t) => ({
+        ...t,
+        selectable: true,
+      }))
+    : [];
   const rejectedExplanationVisible =
     !isDeleted &&
     !document.externalUrl &&
@@ -460,7 +585,7 @@ export default async function DocumentDetailPage({
   // read — not just document.feedbackEnabled alone, since turning that off
   // (FeedbackManagement.tsx) only stops new submissions, it shouldn't hide
   // a tab that still has existing feedback worth reading.
-  const hasFeedbackTab = feedbackVisible && (document.feedbackEnabled || feedback.length > 0);
+  const hasFeedbackTab = feedbackVisible && (document.feedbackEnabled || leadershipComment || feedback.length > 0);
   // Always shown for any non-link document — its CONTENTS vary instead
   // (versionsVisibleToViewer below, keyed off canSeeReviewTrail): a
   // stakeholder sees the real full history, a base "user" (or a contributor
@@ -472,12 +597,36 @@ export default async function DocumentDetailPage({
   // editOwnUpload/manageDocumentLifecycle) — without including it here too,
   // someone who can legitimately triage feedback could end up with no
   // Manage tab to reach FeedbackManagement from at all.
+  // Folder per team (Home > My teams), for the teams whose folders this
+  // viewer manages (lib/access.ts canManageFolders).
+  const folderTeams =
+    !isDeleted && document.visibility === "restricted"
+      ? document.teamAccess.filter((a) => canManageFolders(user, a.teamId))
+      : [];
+  const folderOptions = folderTeams.length
+    ? await prisma.teamFolder.findMany({
+        where: { teamId: { in: folderTeams.map((a) => a.teamId) } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, teamId: true },
+      })
+    : [];
+  const folderControls = folderTeams.map((a) => ({
+    teamId: a.teamId,
+    teamName: a.team.name,
+    folderId: a.folderId,
+    folders: folderOptions.filter((f) => f.teamId === a.teamId).map(({ id, name }) => ({ id, name })),
+  }));
+
   const hasManageTab =
+    folderControls.length > 0 ||
     canManageLifecycle ||
     canEdit ||
     rejectedExplanationVisible ||
     (canManageFeedback && hasEverPublished) ||
-    (canManageSharing && hasEverPublished);
+    (canManageSharing && hasEverPublished) ||
+    canEditAccess ||
+    canEditDownloads ||
+    showEveryoneRequest;
 
   const reviewBadge = reviewActionsVisible
     ? { count: Math.max(inlineComments.length, 1), attention: true }
@@ -485,6 +634,29 @@ export default async function DocumentDetailPage({
     ? { count: inlineComments.length, attention: false }
     : null;
   const feedbackBadge = feedback.length > 0 ? { count: feedback.length, attention: false } : null;
+
+  // "What you can do here": one plain line so nobody has to guess what
+  // their role allows on this document, and who to ask for the rest.
+  const live = !isDeleted && isPubliclyVisible;
+  const teamDoc = document.visibility === "restricted";
+  const youCan: string[] = ["view it"];
+  if (live && effectiveCurrentVersion && !previewOnly) youCan.push("download it");
+  if (live && document.shareEnabled && sharingAllowed(document)) youCan.push("share it with customers");
+  if (feedbackVisible && (document.feedbackEnabled || leadershipComment)) youCan.push("leave feedback");
+  if (reviewActionsVisible) youCan.push("approve or reject it");
+  if (canEdit) youCan.push("edit its details");
+  if (canUploadVersion) youCan.push("upload a new version");
+  if (folderControls.length > 0) youCan.push("move it between folders");
+  if (canArchive) youCan.push("archive it");
+  if (canUnarchive) youCan.push("restore it");
+  if (canDelete) youCan.push("delete it");
+  const youCannot: string[] = [];
+  if (live && previewOnly) youCannot.push("download it (preview only)");
+  if (live && teamDoc) youCannot.push("share it outside the company (team document)");
+  else if (live && !document.shareEnabled) youCannot.push("share it (sharing is turned off)");
+  if (!canEdit && !isDeleted && document.uploadedById !== user.id) {
+    youCannot.push(`change it: only ${document.uploadedBy.name} and the managers who reviewed it can`);
+  }
 
   const tabs: DetailTab[] = [];
 
@@ -545,17 +717,21 @@ export default async function DocumentDetailPage({
                     }
                   : null
               }
+              previewOnly={previewOnly}
               pendingVersion={{
                 versionNumber: document.versions[0].versionNumber,
                 label: versionLabel(document.versions[0].id, document.versions[0].versionNumber),
                 previewPdfPath: document.versions[0].previewPdfPath,
                 extractedText: document.versions[0].extractedText,
               }}
-              // Only true when the "pending" version is actually just the
-              // live current one (e.g. a recheck round with no new upload)
-              // — otherwise no role downloads a version that isn't current,
-              // matching app/api/documents/[id]/download/route.ts.
-              pendingDownloadable={document.versions[0].id === effectiveCurrentVersion?.id}
+              // Same rule as app/api/documents/[id]/download/route.ts: the
+              // live version follows the Preview only choice; a version still
+              // under review is downloadable only by its uploader and reviewers.
+              pendingDownloadable={
+                document.versions[0].id === effectiveCurrentVersion?.id
+                  ? !previewOnly
+                  : involvedInReview(user, document, reviewRequests)
+              }
               compareVersions={document.versions.map((v) => ({
                 versionNumber: v.versionNumber,
                 label: versionLabel(v.id, v.versionNumber),
@@ -622,9 +798,18 @@ export default async function DocumentDetailPage({
               versions={document.versions
                 .filter((v) => v.id === document.versions[0].id || approvedVersionIds.has(v.id))
                 .map((v) => ({ id: v.id, versionNumber: v.versionNumber, label: versionLabel(v.id, v.versionNumber) }))}
-              isOwnDocument={document.uploadedById === user.id}
+              // Uploaded the document, or the version being reviewed: either
+              // way they can't approve it (same rule as the review route).
+              isOwnDocument={document.uploadedById === user.id || document.versions[0]?.uploadedById === user.id}
+              decideBlockedReason={decideBlockedReason}
               myReportsToId={user.reportsToId}
               otherPendingReviewers={otherPendingReviewers}
+              restrictedToTeamIds={document.visibility === "restricted" ? currentAccessTeamIds : null}
+              currentVisibility={document.visibility}
+              currentDownloadable={document.downloadable}
+              currentTeamIds={currentAccessTeamIds}
+              currentTeamNames={document.teamAccess.map((a) => a.team.name).sort()}
+              teamOptions={approvalTeamOptions}
             />
           )}
 
@@ -740,6 +925,7 @@ export default async function DocumentDetailPage({
                                 extractedText={v.extractedText}
                                 hasPreviewPdf={Boolean(v.previewPdfPath)}
                                 variant="link"
+                                previewOnly={previewOnly}
                               />
                             )}
                           </td>
@@ -751,7 +937,7 @@ export default async function DocumentDetailPage({
                                 view-only now, regardless of role. Matches
                                 app/api/documents/[id]/download/route.ts's
                                 own enforcement. */}
-                            {!isDeleted && v.id === effectiveCurrentVersion?.id ? (
+                            {!isDeleted && !previewOnly && v.id === effectiveCurrentVersion?.id ? (
                               <DownloadMenu
                                 documentId={document.id}
                                 version={v.versionNumber}
@@ -760,7 +946,7 @@ export default async function DocumentDetailPage({
                                 variant="link"
                               />
                             ) : (
-                              !isDeleted && <span className="text-xs text-ff-textMuted">Not available</span>
+                              !isDeleted && <span className="text-xs text-ff-textMuted">{previewOnly ? "Preview only" : "Not available"}</span>
                             )}
                           </td>
                         </tr>
@@ -836,8 +1022,10 @@ export default async function DocumentDetailPage({
                 initialTitle={document.title}
                 initialDocType={document.docType}
                 initialTags={document.tags}
-                fields={fields}
                 initialMetadata={metadata}
+                categories={allCategories.map((c) => ({ id: c.id, name: c.name, fields: (c.formSchema as unknown as CategoryFormField[]) ?? [] }))}
+                initialCategoryId={document.categoryId}
+                initialExtraCategoryIds={document.extraCategories.map((e) => e.categoryId)}
               />
             )}
 
@@ -850,8 +1038,47 @@ export default async function DocumentDetailPage({
 
             {/* Only meaningful once the document's actually been published
                 at least once — same reasoning as FeedbackManagement above. */}
-            {canManageSharing && hasEverPublished && (
+            {canManageSharing && hasEverPublished && sharingAllowed(document) && (
               <ShareSettings documentId={document.id} initialShareEnabled={document.shareEnabled} />
+            )}
+
+            {folderControls.length > 0 && <DocumentFolderSettings documentId={document.id} teams={folderControls} />}
+
+            {canEditAccess && (
+              <AccessSettings
+                documentId={document.id}
+                initialVisibility={document.visibility}
+                initialTeamIds={currentAccessTeamIds}
+                teamOptions={teamOptions}
+                canOpenToOrg={canOpenToOrg}
+              />
+            )}
+
+            {showEveryoneRequest && (
+              <EveryoneRequestPanel
+                documentId={document.id}
+                mode="request"
+                pending={everyonePending}
+                approverName={globalApproverName}
+                canWithdraw={pendingEveryoneRequest?.requestedById === user.id}
+                lastDecision={
+                  latestEveryoneRequest && latestEveryoneRequest.status !== "pending"
+                    ? {
+                        approved: latestEveryoneRequest.status === "approved",
+                        decidedByName: latestEveryoneRequest.decidedBy?.name ?? null,
+                        comment: latestEveryoneRequest.decisionComment,
+                        decidedAt: latestEveryoneRequest.decidedAt?.toISOString() ?? null,
+                      }
+                    : null
+                }
+              />
+            )}
+
+            {canEditDownloads && (
+              <DownloadSettings
+                documentId={document.id}
+                initialDownloadable={document.downloadable}
+              />
             )}
 
             {/* Explains why the replace icon isn't showing up top for a
@@ -892,9 +1119,9 @@ export default async function DocumentDetailPage({
         <DocumentFeedback
           documentId={document.id}
           myUserId={user.id}
-          canModerate={user.role === "manager" || user.role === "superadmin"}
+          canModerate={docRole === "manager" || docRole === "superadmin"}
           canTriage={canManageFeedback}
-          feedbackEnabled={document.feedbackEnabled}
+          feedbackEnabled={document.feedbackEnabled || leadershipComment}
           taggableUsers={taggableUsers}
           initialFeedback={feedback.map((f) => ({
             ...f,
@@ -916,7 +1143,7 @@ export default async function DocumentDetailPage({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <Link
@@ -934,6 +1161,10 @@ export default async function DocumentDetailPage({
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
           <DocTypeIcon docType={document.docType} className="h-5 w-5 shrink-0 text-ff-textMuted" />
           <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight text-ff-text">{document.title}</h1>
+          {/* What this viewer can and can't do here, one tap away. */}
+          <InfoTooltip
+            text={`You can ${youCan.join(", ")}.${youCannot.length ? ` You can't ${youCannot.join("; ")}.` : ""}`}
+          />
           {/* A new version is awaiting a decision on a document that's
               already been published before — worded differently depending
               on who's looking: a manager/reviewer still has a decision to
@@ -941,7 +1172,7 @@ export default async function DocumentDetailPage({
               one. Jumps straight into the Review tab's status section. */}
           {hasEverPublished &&
             document.status === "pending_review" &&
-            (user.role === "manager" || user.role === "superadmin" || document.uploadedById === user.id) && (
+            (docRole === "manager" || docRole === "superadmin" || document.uploadedById === user.id) && (
               <Badge
                 variant="warning"
                 solid
@@ -950,7 +1181,7 @@ export default async function DocumentDetailPage({
                 tooltip="Go to the review section"
                 href={`/dashboard/documents/${document.id}#review-status`}
               >
-                {user.role === "manager" || user.role === "superadmin" ? "Waiting for review" : "Under review"}
+                {docRole === "manager" || docRole === "superadmin" ? "Waiting for review" : "Under review"}
               </Badge>
             )}
         </div>
@@ -962,7 +1193,7 @@ export default async function DocumentDetailPage({
             title above. */}
         <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ff-textMuted">
           <span className="flex min-w-0 flex-wrap items-center gap-2 break-words">
-            Uploaded by {document.uploadedBy.name} · Reviewer: {document.owner.name}
+            Uploaded by {document.uploadedBy.name} · {document.reviewBypassed ? "Published without review" : `Reviewer: ${document.owner.name}`}
             {canManageLifecycle && !isDeleted && document.status === "published" && effectiveCurrentVersion && (
               <CurrentVersionControl
                 documentId={document.id}
@@ -974,7 +1205,18 @@ export default async function DocumentDetailPage({
               />
             )}
           </span>
-          <Badge variant="neutral">{document.category.name}</Badge>
+          {!document.category.isSystem && <Badge variant="neutral">{document.category.name}</Badge>}
+          {document.extraCategories.map((e) => (
+            <Badge key={e.categoryId} variant="neutral" tooltip="Also listed in this category">
+              {e.category.name}
+            </Badge>
+          ))}
+          <AccessBadges
+            visibility={document.visibility}
+            teamNames={document.teamAccess.map((a) => a.team.name).sort()}
+            reviewBypassed={document.reviewBypassed}
+            downloadable={document.downloadable}
+          />
           {document.neverExpires ? (
             <Badge variant="success">Permanent</Badge>
           ) : (
@@ -1007,6 +1249,7 @@ export default async function DocumentDetailPage({
           )}
         </div>
 
+
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {/* Secondary/admin actions — visually de-emphasized and grouped
@@ -1014,13 +1257,17 @@ export default async function DocumentDetailPage({
                 one thing most people came here to do (preview/download)
                 stays the visual focus instead of competing with manager-only
                 controls that only sometimes apply. */}
-            {(canRestore || canUploadVersion || canDelete || canArchive || canUnarchive || canRevoke) && (
+            {(canRestore || canUploadVersion || canDelete || canArchive || canUnarchive) && (
               <div className="flex flex-wrap items-center gap-1.5 border-r border-ff-border pr-2">
                 {canRestore && <RestoreButton documentId={document.id} />}
                 {canUploadVersion && !document.externalUrl && (
-                  <UploadVersionForm documentId={document.id} isRejected={document.status === "rejected"} />
+                  <UploadVersionForm
+                    documentId={document.id}
+                    isRejected={document.status === "rejected"}
+                    canBypassReview={canBypassReviewFor(user, document.visibility, currentAccessTeamIds)}
+                    restrictedToTeamIds={document.visibility === "restricted" ? currentAccessTeamIds : null}
+                  />
                 )}
-                {canRevoke && <RevokeButton documentId={document.id} />}
                 {(canArchive || canUnarchive) && (
                   <ArchiveButton documentId={document.id} archived={document.status === "archived"} />
                 )}
@@ -1036,10 +1283,10 @@ export default async function DocumentDetailPage({
                     shareable, same as the file-based branch below (which
                     gates on effectiveCurrentVersion, itself isPubliclyVisible-
                     aware) already does. */}
-                {isPubliclyVisible && (document.shareEnabled ? (
+                {isPubliclyVisible && (document.shareEnabled && sharingAllowed(document) ? (
                   <ShareModal documentId={document.id} />
                 ) : (
-                  <SharingNotAllowedLabel />
+                  <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
                 ))}
                 <a
                   href={document.externalUrl}
@@ -1058,8 +1305,13 @@ export default async function DocumentDetailPage({
                   docType={document.docType}
                   extractedText={effectiveCurrentVersion.extractedText}
                   hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
+                  previewOnly={previewOnly}
                 />
-                {document.shareEnabled ? <ShareModal documentId={document.id} /> : <SharingNotAllowedLabel />}
+                {document.shareEnabled && sharingAllowed(document) ? (
+                  <ShareModal documentId={document.id} />
+                ) : (
+                  <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
+                )}
                 {/* No `versions`/currentVersionNumber here anymore — only
                     the current live version is ever downloadable, by
                     anyone, regardless of role. Older versions (including
@@ -1067,12 +1319,22 @@ export default async function DocumentDetailPage({
                     view-only now: reviewers/contributors look at them via
                     Preview while reviewing, not Download — see the matching
                     restriction in app/api/documents/[id]/download/route.ts. */}
-                <DownloadMenu
-                  documentId={document.id}
-                  hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
-                  docType={document.docType}
-                  variant="cta"
-                />
+                {previewOnly ? (
+                  <span
+                    title="Downloads are turned off for this document"
+                    className="flex items-center gap-1.5 rounded-ff border border-ff-border bg-ff-lavender/40 px-4 py-2 text-sm text-ff-textMuted"
+                  >
+                    <EyeOff className="h-4 w-4" aria-hidden />
+                    Preview only
+                  </span>
+                ) : (
+                  <DownloadMenu
+                    documentId={document.id}
+                    hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
+                    docType={document.docType}
+                    variant="cta"
+                  />
+                )}
               </>
             )}
           </div>
@@ -1094,9 +1356,9 @@ export default async function DocumentDetailPage({
 
         {!isDeleted && document.status === "revoked" && (
           <div className="rounded-ff border border-ff-danger/40 bg-ff-danger/10 p-3 text-sm text-ff-text">
-            Revoked{document.revokedBy && <> by {document.revokedBy.name}</>}
-            {document.revokedAt && <> on <LocalDateTime value={document.revokedAt} /></>}. Hidden from the public
-            dashboard until it&apos;s re-approved.
+            Back in review{document.revokedBy && <>, sent by {document.revokedBy.name}</>}
+            {document.revokedAt && <> on <LocalDateTime value={document.revokedAt} /></>}. Hidden from everyone
+            until it&apos;s re-approved.
             {document.revokeReason && (
               <>
                 {" "}
@@ -1108,7 +1370,7 @@ export default async function DocumentDetailPage({
 
         {document.status === "archived" && (
           <div className="rounded-ff border border-ff-border bg-ff-lavender/40 p-3 text-sm text-ff-text">
-            This document has been archived and is hidden from the public dashboard.
+            This document is archived and hidden from everyone. A manager can restore it, which sends it back for approval.
           </div>
         )}
 
@@ -1130,6 +1392,12 @@ export default async function DocumentDetailPage({
           </div>
         )}
         </div>
+
+        {showEveryoneDecision && (
+          <div className="mb-4">
+            <EveryoneRequestPanel documentId={document.id} mode="decide" pending={everyonePending} />
+          </div>
+        )}
 
         <DocumentDetailTabs tabs={tabs} defaultTabKey="versions" />
         </div>
@@ -1180,10 +1448,10 @@ function DocumentDetailsSection({
 // afterward, from the Manage tab's ShareSettings) has turned sharing off
 // for this document (Document.shareEnabled) — so its absence reads as a
 // deliberate decision rather than the control having silently disappeared.
-function SharingNotAllowedLabel() {
+function SharingNotAllowedLabel({ teamOnly = false }: { teamOnly?: boolean }) {
   return (
     <span
-      title="An approver or manager has turned off sharing for this document."
+      title={teamOnly ? "Team documents stay inside the company." : "An approver or manager has turned off sharing for this document."}
       className="inline-flex items-center gap-1.5 rounded-full border border-ff-border bg-ff-lavender/40 px-3 py-1.5 text-xs font-medium text-ff-textMuted"
     >
       <Ban className="h-3.5 w-3.5" aria-hidden />

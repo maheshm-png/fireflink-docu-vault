@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { X, Eye, Maximize2, Minimize2 } from "lucide-react";
 import PptxSlideViewer from "./PptxSlideViewer";
 import SpreadsheetViewer from "./SpreadsheetViewer";
+import PdfPageViewer from "./PdfPageViewer";
+import ViewOnlyWatermark from "./ViewOnlyWatermark";
 import { toEmbeddableUrl } from "@/lib/externalUrl";
 
 export default function DocumentPreview({
@@ -16,6 +18,7 @@ export default function DocumentPreview({
   label = "Preview",
   variant = "button",
   restrictToolbar = false,
+  previewOnly = false,
 }: {
   documentId: string;
   docType: string;
@@ -43,6 +46,13 @@ export default function DocumentPreview({
    * UI hint, not real DRM — the bytes are still in the loaded iframe/video
    * for a technical user to get another way. */
   restrictToolbar?: boolean;
+  /** A preview-only document (lib/access.ts downloadsAllowed): PDFs render
+   * page by page onto a canvas with a watermark instead of the browser's
+   * PDF viewer (which has its own Save button), and right-click, drag and
+   * text selection are blocked, the same viewer a view-only share link
+   * uses (app/share/[token]/page.tsx). Deters casual saving; screenshots
+   * can't be prevented by any web page. */
+  previewOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -127,6 +137,16 @@ export default function DocumentPreview({
                   className={maximized ? "h-full w-full" : "h-[75vh] w-full"}
                   title="Document preview"
                 />
+              ) : previewOnly && (docType === "pdf" || hasPreviewPdf) ? (
+                <div className={maximized ? "h-full" : "h-[75vh]"}>
+                  <PdfPageViewer
+                    documentId={documentId}
+                    version={version}
+                    fillHeight
+                    disableInteraction
+                    watermark={<ViewOnlyWatermark lines={["PREVIEW ONLY", new Date().toLocaleString()]} />}
+                  />
+                </div>
               ) : docType === "pdf" || hasPreviewPdf ? (
                 // key forces a fresh load (and zoom=page-fit re-fits it) on
                 // every maximize/minimize toggle — the browser's built-in
@@ -141,26 +161,32 @@ export default function DocumentPreview({
               ) : docType === "video" ? (
                 <video
                   controls
-                  controlsList={restrictToolbar ? "nodownload" : undefined}
+                  controlsList={restrictToolbar || previewOnly ? "nodownload" : undefined}
+                  onContextMenu={previewOnly ? (e) => e.preventDefault() : undefined}
                   className={`w-full bg-black ${maximized ? "h-full" : "max-h-[75vh]"}`}
                   src={previewUrl}
                 />
               ) : docType === "ppt" ? (
-                <PptxSlideViewer documentId={documentId} version={version} />
+                <PptxSlideViewer documentId={documentId} version={version} disableInteraction={previewOnly} />
               ) : docType === "excel" ? (
-                <SpreadsheetViewer documentId={documentId} version={version} />
+                <div
+                  className={previewOnly ? "select-none" : undefined}
+                  onContextMenu={previewOnly ? (e) => e.preventDefault() : undefined}
+                >
+                  <SpreadsheetViewer documentId={documentId} version={version} />
+                </div>
               ) : extractedText ? (
                 <div className="p-4">
                   <p className="mb-3 text-xs text-ff-textMuted">
                     This file type can&apos;t be rendered inline, showing its extracted text content instead.
                   </p>
-                  <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-ff border border-ff-border bg-ff-lavender/40 p-3 text-sm text-ff-text">
+                  <pre className={`${previewOnly ? "select-none " : ""}max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-ff border border-ff-border bg-ff-lavender/40 p-3 text-sm text-ff-text`}>
                     {extractedText}
                   </pre>
                 </div>
               ) : (
                 <div className="p-10 text-center text-sm text-ff-textMuted">
-                  No preview available for this file type. Download it to view the content.
+                  {previewOnly ? "No preview available for this file type." : "No preview available for this file type. Download it to view the content."}
                 </div>
               )}
             </div>

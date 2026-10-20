@@ -254,7 +254,7 @@ export default function ReviewTrailWithHighlights({
           <span className="block text-xs text-ff-textMuted">
             {/* Only reachable when highlights.length > 0 — see `noComments`
                 above, which handles the zero-comments case on its own. */}
-            Where reviewers&apos; comments landed on the document. Click a comment above, or here, to view.
+            See where reviewers commented on the document.
           </span>
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
 import Logo from "@/components/Logo";
 import DocTypeIcon, { DOC_TYPE_LABEL } from "@/components/DocTypeIcon";
 import PptxSlideViewer from "@/components/PptxSlideViewer";
@@ -23,10 +24,7 @@ export default async function SharePage({ params }: { params: { token: string } 
     },
   });
 
-  const unavailable =
-    !share || (share.expiresAt !== null && share.expiresAt.getTime() < Date.now()) || share.document.deletedAt;
-
-  if (unavailable) {
+  if (!share || !shareLinkUsable(share)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#FBF8FA] px-6 text-center">
         <Logo width={140} height={34} priority />
@@ -40,7 +38,10 @@ export default async function SharePage({ params }: { params: { token: string } 
   }
 
   const { document } = share;
-  const canDownload = share.accessLevel === "view_download";
+  // A preview-only document (lib/access.ts downloadsAllowed) overrides a
+  // link created as "View & download": no Download button, and the
+  // protected, watermarked view-only viewer below.
+  const canDownload = share.accessLevel === "view_download" && downloadsAllowed(share.document);
   const version = document.currentVersion;
   const accessLabel = canDownload ? "View & Download" : "View Only";
   // See components/ViewOnlyWatermark.tsx's own comment for what this is

@@ -4,14 +4,16 @@ import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  Home, Files, LayoutDashboard, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
-  Sparkles, Megaphone, IdCard, RotateCcw, Archive, Tags, Search, KeyRound, UsersRound, BookOpenText, Mail, LayoutGrid,
+  Home, Files, HelpCircle, ShieldCheck, BarChart3, Users, ChevronDown, LogOut, Trash2, Settings,
+  Sparkles, Megaphone, Tags, Search, KeyRound, BookOpenText, Mail, LayoutGrid, Briefcase, Newspaper,
+  Building2, UserRound,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
+import InfoTooltip from "./InfoTooltip";
+import { ORG_LEVEL, TEAM_LEVEL } from "@/lib/roleCopy";
 import Logo from "./Logo";
 import NotificationBell from "./NotificationBell";
-import InfoTooltip from "./InfoTooltip";
 import PlumWatermark from "./PlumWatermark";
 
 // Same client-side reset-email flow used on the logged-out /login page (see
@@ -24,18 +26,40 @@ const supabase = createBrowserClient(
 
 type NavItem = { href: string; label: string; icon: typeof Files; title?: string };
 
+// One branch of the profile menu's access tree: an elbow connector from the
+// root's trunk, plus the trunk carried on past this row unless it's the last.
+function TreeBranch({ last, children }: { last?: boolean; children: React.ReactNode }) {
+  return (
+    <li className="relative flex items-center gap-2 py-1 pl-7">
+      <span aria-hidden className="absolute left-3 top-0 h-1/2 w-3 rounded-bl border-b border-l border-ff-border" />
+      {!last && <span aria-hidden className="absolute bottom-0 left-3 top-1/2 border-l border-ff-border" />}
+      {children}
+    </li>
+  );
+}
+
+function RolePill({ label, strong }: { label: string; strong?: boolean }) {
+  return (
+    <span
+      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+        strong ? "bg-ff-accent text-white" : "bg-ff-lavender text-ff-accent"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function Navbar({
   role,
   userName,
   userEmail,
-  userDesignation,
   userTeam,
   userReportsTo,
 }: {
   role: Role;
   userName: string;
   userEmail: string;
-  userDesignation?: string | null;
   userTeam?: string | null;
   userReportsTo?: string | null;
 }) {
@@ -50,6 +74,7 @@ export default function Navbar({
   const [changeErrorMessage, setChangeErrorMessage] = useState<string | null>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const onMyTeams = pathname === "/dashboard" && searchParams.get("space") === "teams";
   // Full path+query, so a dropdown item like "/dashboard/pending?status=
   // archived" can actually be matched — usePathname() alone drops the query
   // string, so plain equality against pathname would never highlight it.
@@ -142,27 +167,34 @@ export default function Navbar({
 
   const isUser = role === "user";
   const isManagerUp = role === "manager" || role === "superadmin";
+  // A "user" org role can still have My Work through a team role;
+  // only the server knows, so ask it (once per mount).
+  const [teamWork, setTeamWork] = useState(false);
+  useEffect(() => {
+    if (!isUser) return;
+    let cancelled = false;
+    fetch("/api/my-work-access")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.myWork) setTeamWork(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isUser]);
+  const showMyWork = !isUser || teamWork;
 
-  // Published/Revoked are open to every role, same as before. Archived
-  // reuses the Review Dashboard's own tab (app/dashboard/pending?status=
-  // archived) and Deleted is the existing manager/superadmin-only recovery
-  // page — both keep the exact same role gate their standalone pages
-  // already enforce, just grouped here instead of listed separately.
-  // Categories lives here too, not under Help — it's not documentation,
-  // it's the config that defines what a category's upload form asks for
-  // (with its own create/edit flow for managers), so it belongs with the
-  // rest of the document-organizing structure rather than the Ask AI page.
-  const documentsItems: NavItem[] = [
-    { href: "/dashboard", label: "Published", icon: Files },
-    { href: "/dashboard/revoked", label: "Revoked", icon: RotateCcw },
-    ...(!isUser ? [{ href: "/dashboard/pending?status=archived", label: "Archived", icon: Archive }] : []),
-    ...(isManagerUp ? [{ href: "/admin/deleted", label: "Deleted", icon: Trash2 }] : []),
-    ...(!isUser ? [{ href: "/admin/categories", label: "Categories", icon: Tags }] : []),
-  ];
-
+  // Archived documents are a status filter on My Work; Deleted (the
+  // manager/superadmin recovery page) sits in Controls.
   const helpItems: NavItem[] = [
     { href: "/dashboard/assistant", label: "Ask Docu AI", icon: Sparkles },
-    { href: "/dashboard/help", label: "Roles & Features", icon: BookOpenText },
+    { href: "/dashboard/help", label: "What can I do?", icon: BookOpenText },
+    { href: "/dashboard/release-notes", label: "Release notes", icon: Newspaper },
+    // Contributors look categories up (what each one's upload form asks
+    // for); managers and superadmins edit them, so theirs sits in Controls
+    // next to Settings instead.
+    ...(role === "contributor" ? [{ href: "/admin/categories", label: "Categories", icon: Tags }] : []),
     {
       href: "mailto:docuvault@fireflink.com?subject=FireFlink%20Docu%20Vault%20Support",
       label: "Contact Support",
@@ -176,9 +208,10 @@ export default function Navbar({
     ...(isManagerUp ? [{ href: "/admin/analytics", label: "Analytics", icon: BarChart3 }] : []),
     ...(isManagerUp ? [{ href: "/admin/announcements", label: "Announcements", icon: Megaphone }] : []),
     ...(isManagerUp ? [{ href: "/admin/settings", label: "Settings", icon: Settings }] : []),
-    ...(role === "superadmin" ? [{ href: "/admin/users", label: "Manage Users", icon: Users }] : []),
-    ...(role === "superadmin" ? [{ href: "/admin/designations", label: "Designations", icon: IdCard }] : []),
-    ...(role === "superadmin" ? [{ href: "/admin/teams", label: "Teams", icon: UsersRound }] : []),
+    ...(isManagerUp ? [{ href: "/admin/categories", label: "Categories", icon: Tags }] : []),
+    ...(isManagerUp ? [{ href: "/admin/deleted", label: "Deleted", icon: Trash2 }] : []),
+    // Users and Teams are tabs of one People page.
+    ...(role === "superadmin" ? [{ href: "/admin/users", label: "People", icon: Users }] : []),
     ...(role === "superadmin" ? [{ href: "/admin/workspace-apps", label: "Presales Team Assets", icon: LayoutGrid }] : []),
   ];
 
@@ -195,7 +228,7 @@ export default function Navbar({
             sits in the leftover space after the logo, so it never overlaps
             the logo, the centered nav, or the icon cluster on the right. */}
         <PlumWatermark className="absolute -top-8 left-40 z-0 hidden w-20 sm:block" />
-        <Link href="/dashboard/home" className="relative z-10 flex shrink-0 items-center gap-2.5">
+        <Link href="/dashboard" className="relative z-10 flex shrink-0 items-center gap-2.5">
           <Logo variant="white" width={130} height={32} priority />
           <span className="hidden h-5 w-px bg-white/25 sm:block" aria-hidden />
           <span className="hidden whitespace-nowrap text-lg font-bold uppercase tracking-wide text-white sm:block">
@@ -205,12 +238,12 @@ export default function Navbar({
       </div>
 
       <nav className="flex shrink-0 flex-wrap items-center justify-center gap-1">
-        <NavLink item={{ href: "/dashboard/home", label: "Home", icon: Home }} active={pathname === "/dashboard/home"} />
-        <NavDropdown label="Documents" icon={Files} items={documentsItems} currentPath={currentPath} />
-        {!isUser && (
+        {/* Home is the published documents page (the separate Home page was merged into it). */}
+        <NavLink item={{ href: "/dashboard", label: "Home", icon: Home }} active={pathname === "/dashboard"} />
+        {showMyWork && (
           <NavLink
-            item={{ href: "/dashboard/pending", label: "Dashboard", icon: LayoutDashboard }}
-            active={pathname === "/dashboard/pending"}
+            item={{ href: "/dashboard/my-work", label: "My Work", icon: Briefcase }}
+            active={pathname === "/dashboard/my-work"}
           />
         )}
         <NavDropdown label="Help" icon={HelpCircle} items={helpItems} currentPath={currentPath} />
@@ -221,7 +254,10 @@ export default function Navbar({
 
       <div className="flex basis-0 items-center justify-end gap-1.5 sm:gap-2" style={{ flexGrow: 1 }}>
         {/* Search icon that expands into an input on click, instead of a
-            persistent box competing with the nav for space. */}
+            persistent box competing with the nav for space. Hidden on Home >
+            My teams, which has its own search box over the open team's
+            documents (the site-wide search doesn't cover team documents). */}
+        {!onMyTeams && (
         <div className="relative shrink-0">
           {searchOpen ? (
             <form
@@ -255,6 +291,7 @@ export default function Navbar({
             </button>
           )}
         </div>
+        )}
 
         <NotificationBell collapsed={false} />
 
@@ -284,27 +321,63 @@ export default function Navbar({
                     <div className="truncate text-xs text-ff-textMuted">{userEmail}</div>
                   </div>
                 </div>
-                <dl className="space-y-2 border-t border-ff-border pt-3 text-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="flex shrink-0 items-center gap-1 text-ff-textMuted">
-                      Role
-                      <InfoTooltip text={ROLE_DESCRIPTIONS[role]} align="right" />
-                    </dt>
-                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{ROLE_LABELS[role]}</dd>
+                {/* Access tree: the org (org role) at the root, one branch per
+                    team (team role), then who they report to. userTeam is
+                    "BD (Manager), Sales (Contributor)". */}
+                <div className="border-t border-ff-border pt-3 text-sm">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ff-textMuted">Your access</div>
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ff-accent text-white">
+                      <Building2 className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-ff-text">FireFlink</span>
+                      <span className="flex items-center gap-1 text-xs text-ff-textMuted">
+                        Org role
+                        <InfoTooltip text={`${ORG_LEVEL.covers}. ${ROLE_DESCRIPTIONS[role]}`} align="right" />
+                      </span>
+                    </span>
+                    <RolePill label={ROLE_LABELS[role]} strong />
                   </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="shrink-0 text-ff-textMuted">Designation</dt>
-                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userDesignation ?? "N/A"}</dd>
+                  <ul>
+                    {(() => {
+                      const teams = (userTeam ? userTeam.split(", ") : []).map((entry) => {
+                        const m = entry.match(/^(.*) \((.*)\)$/);
+                        return m ? { name: m[1], role: m[2] } : { name: entry, role: "" };
+                      });
+                      if (teams.length === 0) {
+                        return (
+                          <TreeBranch last>
+                            <span className="text-xs italic text-ff-textMuted">Not in any team</span>
+                          </TreeBranch>
+                        );
+                      }
+                      return teams.map((t, i) => (
+                        <TreeBranch key={t.name} last={i === teams.length - 1}>
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ff-lavender text-ff-accent">
+                            <Users className="h-3 w-3" aria-hidden />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-ff-text">{t.name}</span>
+                            <span className="flex items-center gap-1 text-xs text-ff-textMuted">
+                              Team role
+                              {i === 0 && <InfoTooltip text={`${TEAM_LEVEL.covers}.`} align="right" />}
+                            </span>
+                          </span>
+                          {t.role && <RolePill label={t.role} />}
+                        </TreeBranch>
+                      ));
+                    })()}
+                  </ul>
+                  <div className="mt-3 flex items-center gap-2 rounded-ff bg-ff-lavender/40 px-2 py-1.5">
+                    <UserRound className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                    <span className="text-xs text-ff-textMuted">Reports to</span>
+                    <span className="ml-auto min-w-0 truncate text-sm font-medium text-ff-text">{userReportsTo ?? "No one"}</span>
                   </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="shrink-0 text-ff-textMuted">Team</dt>
-                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userTeam ?? "N/A"}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="shrink-0 text-ff-textMuted">Reports To</dt>
-                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-ff-text">{userReportsTo ?? "N/A"}</dd>
-                  </div>
-                </dl>
+                  <Link href="/dashboard/help" className="mt-2 block text-xs text-ff-accent hover:underline">
+                    What can I do?
+                  </Link>
+                </div>
 
                 <div className="mt-3 border-t border-ff-border pt-3">
                   {!changingPassword ? (

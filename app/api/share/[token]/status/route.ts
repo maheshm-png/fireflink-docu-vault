@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { shareLinkUsable } from "@/lib/access";
 
 // GET /api/share/:token/status — public, no auth. Polled by
 // components/ShareLinkWatcher.tsx (rendered on the open share page itself)
@@ -13,15 +14,14 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
   const share = await prisma.shareLink.findUnique({
     where: { token: params.token },
-    select: { accessLevel: true, expiresAt: true, document: { select: { deletedAt: true } } },
+    select: {
+      accessLevel: true,
+      expiresAt: true,
+      document: { select: { deletedAt: true, status: true, shareEnabled: true, visibility: true } },
+    },
   });
 
-  const available =
-    Boolean(share) &&
-    !share!.document.deletedAt &&
-    (share!.expiresAt === null || share!.expiresAt.getTime() > Date.now());
-
-  if (!available) {
+  if (!share || !shareLinkUsable(share)) {
     return NextResponse.json({ available: false });
   }
 

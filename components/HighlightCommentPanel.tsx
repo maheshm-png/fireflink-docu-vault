@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2, Pencil, X, ChevronDown, ChevronUp, AtSign, CheckCircle2, XCircle, RotateCcw, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import InfoTooltip from "./InfoTooltip";
 
 // A single entry in a feedback item's reply thread — see
 // PanelItem.replies' own comment for what this covers and doesn't.
@@ -621,6 +622,7 @@ export default function HighlightCommentPanel({
         <h2 className="flex items-center gap-1.5 text-base font-bold text-ff-text">
           <Icon className="h-4 w-4" aria-hidden />
           {heading}
+          {description && <InfoTooltip text={description} />}
         </h2>
         {collapsible && (
           <button
@@ -643,7 +645,7 @@ export default function HighlightCommentPanel({
           attached so scroll/click-away listeners and the highlight segments
           don't need to be torn down and rebuilt on every re-expand. */}
       <div className={collapsed ? "hidden" : ""}>
-      <p className="mb-3 text-xs text-ff-textMuted">{description}</p>
+      <div className="mb-3" />
 
       {hasText ? (
         <div

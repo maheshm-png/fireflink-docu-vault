@@ -21,7 +21,10 @@ function hashCode(code: string) {
 // POST /api/auth/reset-password — verify the OTP issued by
 // /api/auth/forgot-password and apply the new password.
 export async function POST(req: NextRequest) {
-  const { email, code, password } = await req.json();
+  const body = await req.json();
+  const { code, password } = body;
+  // Same normalising as forgot-password, so the code it sent is found.
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
   if (!email || !code || !password) {
     return NextResponse.json({ error: "Email, code, and new password are required." }, { status: 400 });
   }

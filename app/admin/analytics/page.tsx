@@ -5,12 +5,19 @@ import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { prisma } from "@/lib/prisma";
-import { FileCheck, Clock, XCircle, Archive, RotateCcw, AlertTriangle, Trash2, Eye, Download, type LucideIcon } from "lucide-react";
+import { documentAccessWhere } from "@/lib/access";
+import { FileCheck, Clock, XCircle, Archive, AlertTriangle, Trash2, Eye, Download, type LucideIcon } from "lucide-react";
 
 export default async function AnalyticsPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!can(user.role, "viewAuditLog")) redirect("/dashboard");
+
+  // Team access control (lib/access.ts): every count and list below covers
+  // only documents this viewer may see, so a manager's analytics never
+  // reveal another team's restricted titles or volumes. Empty (no-op) for
+  // superadmins and people who see all teams.
+  const acc = documentAccessWhere(user);
 
   const [
     topViewed,
@@ -19,7 +26,6 @@ export default async function AnalyticsPage() {
     pendingCount,
     rejectedCount,
     archivedCount,
-    revokedCount,
     staleCount,
     deletedCount,
     totalViews,
@@ -29,37 +35,36 @@ export default async function AnalyticsPage() {
   ] = await Promise.all([
     prisma.documentEvent.groupBy({
       by: ["documentId"],
-      where: { type: "view" },
+      where: { type: "view", document: acc },
       _count: { documentId: true },
       orderBy: { _count: { documentId: "desc" } },
       take: 10,
     }),
     prisma.documentEvent.groupBy({
       by: ["documentId"],
-      where: { type: "download" },
+      where: { type: "download", document: acc },
       _count: { documentId: true },
       orderBy: { _count: { documentId: "desc" } },
       take: 10,
     }),
-    prisma.document.count({ where: { status: "published", deletedAt: null } }),
-    prisma.document.count({ where: { status: "pending_review", deletedAt: null } }),
-    prisma.document.count({ where: { status: "rejected", deletedAt: null } }),
-    prisma.document.count({ where: { status: "archived", deletedAt: null } }),
-    prisma.document.count({ where: { status: "revoked", deletedAt: null } }),
-    prisma.document.count({ where: { deletedAt: null, stalenessFlags: { some: { resolved: false } } } }),
-    prisma.document.count({ where: { deletedAt: { not: null } } }),
-    prisma.documentEvent.count({ where: { type: "view" } }),
-    prisma.documentEvent.count({ where: { type: "download" } }),
+    prisma.document.count({ where: { AND: [{ status: "published", deletedAt: null }, acc] } }),
+    prisma.document.count({ where: { AND: [{ status: { in: ["pending_review", "revoked"] }, deletedAt: null }, acc] } }),
+    prisma.document.count({ where: { AND: [{ status: "rejected", deletedAt: null }, acc] } }),
+    prisma.document.count({ where: { AND: [{ status: "archived", deletedAt: null }, acc] } }),
+    prisma.document.count({ where: { AND: [{ deletedAt: null, stalenessFlags: { some: { resolved: false } } }, acc] } }),
+    prisma.document.count({ where: { AND: [{ deletedAt: { not: null } }, acc] } }),
+    prisma.documentEvent.count({ where: { type: "view", document: acc } }),
+    prisma.documentEvent.count({ where: { type: "download", document: acc } }),
     prisma.document.groupBy({
       by: ["uploadedById"],
-      where: { deletedAt: null },
+      where: { AND: [{ deletedAt: null }, acc] },
       _count: { uploadedById: true },
       orderBy: { _count: { uploadedById: "desc" } },
       take: 10,
     }),
     prisma.document.groupBy({
       by: ["categoryId"],
-      where: { deletedAt: null },
+      where: { AND: [{ deletedAt: null }, acc] },
       _count: { categoryId: true },
       orderBy: { _count: { categoryId: "desc" } },
     }),
@@ -77,7 +82,7 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">
-      <Navbar role={user.role} userName={user.name} userEmail={user.email} userDesignation={user.designation?.name} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
+      <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="flex-1 overflow-y-auto mx-auto max-w-7xl px-6 py-8 animate-fade-in">
         <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">Analytics</h1>
@@ -85,10 +90,9 @@ export default async function AnalyticsPage() {
 
         <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <StatCard label="Published" value={publishedCount} icon={FileCheck} href="/dashboard" />
-          <StatCard label="Pending Review" value={pendingCount} icon={Clock} href="/dashboard/pending" />
-          <StatCard label="Rejected" value={rejectedCount} icon={XCircle} href="/dashboard/pending?status=rejected" />
-          <StatCard label="Archived" value={archivedCount} icon={Archive} href="/dashboard/pending?status=archived" />
-          <StatCard label="Revoked" value={revokedCount} icon={RotateCcw} href="/dashboard/revoked" />
+          <StatCard label="Pending Review" value={pendingCount} icon={Clock} href="/dashboard/my-work?tab=all&status=pending_review" />
+          <StatCard label="Rejected" value={rejectedCount} icon={XCircle} href="/dashboard/my-work?tab=all&status=rejected" />
+          <StatCard label="Archived" value={archivedCount} icon={Archive} href="/dashboard/my-work?tab=all&status=archived" />
           <StatCard label="Flagged Outdated" value={staleCount} icon={AlertTriangle} href="/admin/analytics/stale" />
           <StatCard label="Deleted" value={deletedCount} icon={Trash2} href="/admin/deleted" />
           <StatCard label="Total Views" value={totalViews} icon={Eye} />

@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
-import { indexDocument } from "@/lib/search";
+import { indexDocument, refreshIndexedAccess } from "@/lib/search";
 import { logAudit } from "@/lib/audit";
 import { notifyReviewDecision, notifyDocumentPublished, notifyReviewerAssigned, notifyNewVersionAvailable, fireNotification } from "@/lib/notify";
 import { everApprovedVersionIds, computeRoundAttempts } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
+import {
+  canReviewDocument,
+  checkAccessChange,
+  eligibleReviewerWhere,
+  passesTeamGate,
+  usersWhoCanSeeWhere,
+  writeAccessChange,
+  type DocAccessInfo,
+} from "@/lib/access";
 
 // POST /api/documents/:id/review
 //
@@ -35,25 +44,49 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // Belt-and-suspenders alongside the per-request ownership check below:
-  // every reviewerId is only ever set to an active manager at assignment
-  // time (validateReassignTarget), but a role change *after* assignment
-  // (e.g. demoted to contributor) shouldn't let a stale assignment keep
-  // acting as if approveReview still applies to them. Deliberately excludes
-  // superadmin too, same as the rest of this app's review gate.
-  if (user.role !== "manager") {
-    return NextResponse.json({ error: "Forbidden: only managers can act on a review." }, { status: 403 });
-  }
+  // Team access control: a restricted document outside this user's teams
+  // is a 404 here, same as one that doesn't exist (lib/access.ts).
+  if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
   const action: string = body.action ?? "decide";
 
-  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  const document = await prisma.document.findUnique({
+    where: { id: params.id },
+    include: {
+      teamAccess: { select: { teamId: true } },
+      reviewRequests: { select: { reviewerId: true } },
+      // Who uploaded the version under review: they can't review it either,
+      // even when someone else uploaded the document originally.
+      versions: { orderBy: { versionNumber: "desc" }, take: 1, select: { uploadedById: true } },
+    },
+  });
   // Gone entirely when the uploader withdrew it before review (purged, see
   // DELETE /api/documents/:id), e.g. the reviewer's page was already open.
   if (!document) {
     return NextResponse.json({ error: "This document was withdrawn by its uploader and no longer exists." }, { status: 404 });
+  }
+
+  // Belt-and-suspenders alongside the per-request ownership check below:
+  // every reviewerId is only ever set to someone eligible at assignment time
+  // (validateReassignTarget), but a role change *after* assignment (e.g.
+  // demoted, or no longer a manager of the document's team) shouldn't let a
+  // stale assignment keep acting. Everyone documents: org managers; team
+  // documents: managers of one of its teams (lib/access.ts). Superadmins
+  // never review.
+  // Reassigning stays open to whoever holds the pending assignment, so a
+  // review assigned before team roles existed (e.g. to an org manager outside the team
+  // outside the team) can still be handed to someone eligible.
+  if (action !== "reassign" && !canReviewDocument(user, document)) {
+    return NextResponse.json(
+      {
+        error:
+          document.visibility === "restricted"
+            ? "Forbidden: only a manager of this document's team can act on its review."
+            : "Forbidden: only managers can act on a review.",
+      },
+      { status: 403 }
+    );
   }
 
   // Deleting a pending document leaves its review rows pending, so a
@@ -121,6 +154,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     await prisma.reviewRequest.update({ where: { id: myRequest.id }, data: { reviewerId: newReviewerId } });
     await logAudit({ userId: user.id, action: "reassign_review", documentId: document.id, documentTitle: document.title });
+    await refreshIndexedAccess(document.id);
 
     const newReviewer = await prisma.user.findUniqueOrThrow({ where: { id: newReviewerId } });
     fireNotification(
@@ -129,6 +163,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         documentId: document.id,
         reviewerId: newReviewerId,
         reviewerName: newReviewer.name,
+        reviewerEmail: newReviewer.email,
         assignedByName: user.name,
         reason: "reassigned",
       })
@@ -153,20 +188,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       if (id === user.id) {
         return NextResponse.json({ error: "Pick someone other than yourself." }, { status: 400 });
       }
-      if (id === document.uploadedById) {
+      if (id === document.uploadedById || id === document.versions[0]?.uploadedById) {
         return NextResponse.json(
           { error: "That person uploaded this document and can't review their own submission." },
           { status: 400 }
         );
       }
     }
-    const targets = await prisma.user.findMany({ where: { id: { in: uniqueIds } } });
-    const targetById = new Map(targets.map((t) => [t.id, t]));
-    for (const id of uniqueIds) {
-      const target = targetById.get(id);
-      if (!target || !target.isActive || target.role !== "manager") {
-        return NextResponse.json({ error: "That person isn't an active manager." }, { status: 400 });
-      }
+    // eligibleReviewerWhere: an active org manager, or for a restricted
+    // document a manager of one of its teams (lib/access.ts).
+    const eligibleCount = await prisma.user.count({ where: { AND: [{ id: { in: uniqueIds } }, eligibleReviewerWhere(document)] } });
+    if (eligibleCount !== uniqueIds.length) {
+      return NextResponse.json(
+        {
+          error:
+            document.visibility === "restricted"
+              ? "Every reviewer must be an active manager in one of this document's teams."
+              : "That person isn't an active manager.",
+        },
+        { status: 400 }
+      );
     }
     // Don't re-add someone who already has an active pending row for this
     // document (e.g. picked twice, or already reassigned in from before).
@@ -204,6 +245,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             documentId: document.id,
             reviewerId: r.id,
             reviewerName: r.name,
+            reviewerEmail: r.email,
             assignedByName: user.name,
             reason: "second_opinion",
           })
@@ -211,6 +253,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       )
     );
     await logAudit({ userId: user.id, action: "request_second_opinion", documentId: document.id, documentTitle: document.title });
+    await refreshIndexedAccess(document.id);
 
     return NextResponse.json({ ok: true, added: toAdd.length });
   }
@@ -219,7 +262,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
-  const { decision, comments, announceToAll, allowFeedback, shareEnabled, versionId } = body;
+  const { decision, comments, announceToAll, allowFeedback, shareEnabled, downloadable, versionId } = body;
   if (!["approved", "rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
@@ -241,11 +284,69 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { status: 400 }
     );
   }
-  if (decision === "approved" && document.uploadedById === user.id) {
+  if (decision === "approved" && typeof downloadable !== "boolean") {
+    return NextResponse.json(
+      { error: "downloadable must be true or false, choose whether downloads are allowed before approving." },
+      { status: 400 }
+    );
+  }
+  // Mandatory re-confirmation of who can see it: the reviewing manager must
+  // explicitly answer "everyone" or "restricted to these teams" on every
+  // approval (ReviewActions.tsx), not just inherit the uploader's choice.
+  // Validated here, before anything is recorded, with the same rules as the
+  // Manage tab (lib/access.ts's checkAccessChange); applied below only when
+  // this approval actually publishes, so with parallel reviewers the last
+  // approver's answer is the one that takes effect.
+  const accessCheck =
+    decision === "approved"
+      ? await checkAccessChange(user, document, body.visibility, body.teamIds, { asApprover: true })
+      : null;
+  if (accessCheck && !accessCheck.ok) {
+    return NextResponse.json({ error: accessCheck.error }, { status: accessCheck.status });
+  }
+
+  if (
+    decision === "approved" &&
+    (document.uploadedById === user.id || document.versions[0]?.uploadedById === user.id)
+  ) {
     return NextResponse.json(
       { error: "You can't approve your own document, reassign it to another reviewer instead." },
       { status: 400 }
     );
+  }
+
+  // The reviewer can publish an earlier version instead of the newest (e.g. a
+  // rollback). Checked before this reviewer's row is recorded: refusing it
+  // afterwards left the row approved, the document still pending and nobody
+  // left to act on it.
+  let pickedVersionId: string | undefined;
+  if (decision === "approved" && versionId && !document.externalUrl) {
+    const chosenVersion = await prisma.documentVersion.findFirst({
+      where: { id: versionId, documentId: params.id },
+    });
+    if (!chosenVersion) {
+      return NextResponse.json({ error: "That version doesn't belong to this document." }, { status: 400 });
+    }
+    // Only two kinds of version are legitimate to publish: one already
+    // approved before (an intentional rollback), or the version this very
+    // round is deciding on. A version rejected in an earlier round never is.
+    const [allVersions, allReviewRequests] = await Promise.all([
+      prisma.documentVersion.findMany({ where: { documentId: params.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
+      prisma.reviewRequest.findMany({ where: { documentId: params.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
+    ]);
+    // Which version THIS round is deciding on, via the real round<->version
+    // mapping (lib/versionRounds.ts's computeRoundAttempts).
+    const thisRoundVersionId = computeRoundAttempts(allVersions, allReviewRequests, document.revokedAt).byRoundNumber.get(
+      myRequest.roundNumber
+    )?.versionId;
+    const approved = everApprovedVersionIds(allVersions, allReviewRequests, document.revokedAt);
+    if (chosenVersion.id !== thisRoundVersionId && !approved.has(chosenVersion.id)) {
+      return NextResponse.json(
+        { error: "That version was rejected in an earlier round and can't be published, pick the current or a previously-approved version instead." },
+        { status: 400 }
+      );
+    }
+    pickedVersionId = chosenVersion.id;
   }
 
   await prisma.reviewRequest.update({
@@ -319,39 +420,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // just externalUrl, so there's nothing to promote.
   let currentVersionId: string | undefined;
   if (!document.externalUrl) {
-    if (versionId) {
-      const chosenVersion = await prisma.documentVersion.findFirstOrThrow({
-        where: { id: versionId, documentId: params.id },
-      });
-      // The picker offers every version, including ones from an earlier
-      // round that was REJECTED — nothing previously stopped one of those
-      // from being chosen here and getting published anyway, which is
-      // exactly backwards: a rejected version already failed review once,
-      // and picking it here would publish it without ever actually being
-      // approved. Only two kinds of version are legitimate to publish: one
-      // that's genuinely already been approved before (an intentional
-      // rollback), or the version this very round is deciding on right now.
-      const [allVersions, allReviewRequests] = await Promise.all([
-        prisma.documentVersion.findMany({ where: { documentId: params.id }, select: { id: true, versionNumber: true, uploadedAt: true } }),
-        prisma.reviewRequest.findMany({ where: { documentId: params.id }, select: { roundNumber: true, status: true, comments: true, createdAt: true } }),
-      ]);
-      // Which version THIS round is actually deciding on — via the real
-      // round<->version mapping (lib/versionRounds.ts's computeRoundAttempts)
-      // rather than the old `sortedVersions[myRequest.roundNumber - 1]`
-      // position guess, which silently went out of bounds (or pointed at
-      // the wrong version) once a revoke had bumped roundNumber past the
-      // number of actual versions.
-      const thisRoundVersionId = computeRoundAttempts(allVersions, allReviewRequests, document.revokedAt).byRoundNumber.get(
-        myRequest.roundNumber
-      )?.versionId;
-      const approved = everApprovedVersionIds(allVersions, allReviewRequests, document.revokedAt);
-      if (chosenVersion.id !== thisRoundVersionId && !approved.has(chosenVersion.id)) {
-        return NextResponse.json(
-          { error: "That version was rejected in an earlier round and can't be published, pick the current or a previously-approved version instead." },
-          { status: 400 }
-        );
-      }
-      currentVersionId = chosenVersion.id;
+    if (pickedVersionId) {
+      currentVersionId = pickedVersionId;
     } else {
       const latestVersion = await prisma.documentVersion.findFirstOrThrow({
         where: { documentId: params.id },
@@ -361,13 +431,33 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
   }
 
+  // Apply the reviewer's confirmed visibility now that this publishes.
+  let finalAccess: DocAccessInfo = document;
+  if (accessCheck?.ok && accessCheck.changed) {
+    await writeAccessChange(user, document.id, accessCheck.visibility, accessCheck.teamIds);
+    await logAudit({ userId: user.id, action: "change_access", documentId: document.id, documentTitle: document.title });
+    finalAccess = { visibility: accessCheck.visibility, teamAccess: accessCheck.teamIds.map((teamId) => ({ teamId })) };
+  }
+
+  // The approving manager decides sharing at publish time. Team documents
+  // can never have a public link (lib/access.ts sharingAllowed).
+  const effectiveShareEnabled = Boolean(shareEnabled) && finalAccess.visibility !== "restricted";
+
   const published = await prisma.document.update({
     where: { id: params.id },
     data: {
       status: "published",
       lastReviewedAt: new Date(),
       feedbackEnabled: allowFeedback,
-      shareEnabled,
+      shareEnabled: effectiveShareEnabled,
+      // The approver's download choice. Restricted documents are always
+      // preview only (lib/access.ts downloadsAllowed), so it's stored as
+      // false for them too, and stays preview only if later opened up
+      // until someone turns downloads on in the Manage tab.
+      downloadable,
+      // Published through a real review now, so the Review Bypassed label
+      // from an earlier "No review needed" upload no longer applies.
+      reviewBypassed: false,
       ...(currentVersionId ? { currentVersionId } : {}),
     },
     include: { category: true, currentVersion: true, uploadedBy: true, duplicateOf: true },
@@ -378,7 +468,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // Manage-tab toggle (components/ShareSettings.tsx) does — otherwise a
   // stale ShareLink row would sit there working while shareEnabled reads
   // false everywhere else.
-  if (!shareEnabled) {
+  if (!effectiveShareEnabled) {
     await prisma.shareLink.deleteMany({ where: { documentId: published.id } });
   }
 
@@ -427,8 +517,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // if the reviewing manager explicitly chose "Yes" (see announceToAll
   // validation above — this can never be silently skipped).
   if (announceToAll === true) {
+    // "All users" means everyone who can see it: for a restricted document
+    // that's its teams, people who see all teams and superadmins (lib/access.ts).
     const recipients = await prisma.user.findMany({
-      where: { isActive: true, id: { not: published.uploadedById } },
+      where: { AND: [{ isActive: true, id: { not: published.uploadedById } }, usersWhoCanSeeWhere(finalAccess)] },
       select: { id: true, name: true },
     });
     fireNotification(
@@ -451,7 +543,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // downloaded a "previous" version of it yet.
   if (published.currentVersion) {
     const priorDownloaders = await prisma.auditLog.findMany({
-      where: { documentId: published.id, action: "download", userId: { not: published.uploadedById } },
+      // Only people who can still see it: someone who downloaded it before
+      // it was restricted must not be emailed its title now.
+      where: {
+        documentId: published.id,
+        action: "download",
+        userId: { not: published.uploadedById },
+        user: { AND: [{ isActive: true }, usersWhoCanSeeWhere(finalAccess)] },
+      },
       distinct: ["userId"],
       select: { user: { select: { email: true, name: true } } },
     });
@@ -491,17 +590,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
  * Returns an error message, or null if it's fine. */
 async function validateReassignTarget(
   targetId: unknown,
-  document: { uploadedById: string },
+  document: { uploadedById: string; versions: { uploadedById: string }[] } & DocAccessInfo,
   callerId: string
 ): Promise<string | null> {
   if (typeof targetId !== "string" || !targetId) return "A reviewer is required.";
   if (targetId === callerId) return "Pick someone other than yourself.";
-  if (targetId === document.uploadedById) {
+  if (targetId === document.uploadedById || targetId === document.versions[0]?.uploadedById) {
     return "That person uploaded this document and can't review their own submission.";
   }
-  const target = await prisma.user.findUnique({ where: { id: targetId } });
-  if (!target || !target.isActive || target.role !== "manager") {
-    return "That person isn't an active manager.";
+  const eligible = await prisma.user.count({ where: { AND: [{ id: targetId }, eligibleReviewerWhere(document)] } });
+  if (!eligible) {
+    return document.visibility === "restricted"
+      ? "That person isn't an active manager in one of this document's teams."
+      : "That person isn't an active manager.";
   }
   return null;
 }
