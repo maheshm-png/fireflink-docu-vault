@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { ReactNode } from "react";
 import { Inter } from "next/font/google";
+import AssistantWidget from "@/components/assistant/AssistantWidget";
 
 // tailwind.config.ts declared "Inter" as the sans stack, but nothing ever
 // actually loaded it — the browser silently fell back to the OS default
@@ -19,7 +20,11 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        {/* Floating Ask Docu AI (shows itself on dashboard/admin pages only). */}
+        <AssistantWidget />
+      </body>
     </html>
   );
 }

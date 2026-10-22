@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { buildStorageKey, uploadFile } from "@/lib/storage";
+import { isVideoFile, processVideoVersion } from "@/lib/videoText";
 import { extractText } from "@/lib/extract";
 import { convertToPdf, isConvertible } from "@/lib/officeConvert";
 import { logAudit } from "@/lib/audit";
@@ -230,6 +231,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploadedById: user.id,
     },
   });
+
+  // Videos are read in the background (lib/videoText.ts); never blocks the upload.
+  if (isVideoFile(file.name)) void processVideoVersion(version.id);
 
   if (bypassReview) {
     return publishBypassedVersion(user, doc, version, duplicateUpdate, (maxRoundSoFar._max.roundNumber ?? 0) + 1);

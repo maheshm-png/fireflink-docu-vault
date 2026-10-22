@@ -73,6 +73,8 @@ ENV PORT=3000
 #   that LibreOffice and fontconfig substitute automatically; Noto covers
 #   non-Latin scripts. docker/fonts.conf aliases the remaining common Office
 #   fonts that have no free clone to the closest-width match.
+# - ffmpeg: samples frames from uploaded videos so the vision model can read
+#   them into searchable text for search and Ask Docu AI (lib/videoText.ts).
 # - cron: only used by the separate `cron` compose service (same image,
 #   different entrypoint/command) that runs the scheduled maintenance
 #   scripts below — unused, harmless weight in the `app` service itself.
@@ -85,6 +87,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certifica
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update -y && apt-get install -y --no-install-recommends \
       libreoffice \
+      ffmpeg \
       openssl \
       fontconfig \
       fonts-dejavu \

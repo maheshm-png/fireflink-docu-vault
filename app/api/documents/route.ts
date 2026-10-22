@@ -3,6 +3,7 @@ import { Prisma, DocType } from "@prisma/client";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import { buildStorageKey, uploadFile } from "@/lib/storage";
+import { isVideoFile, processVideoVersion } from "@/lib/videoText";
 import { extractText } from "@/lib/extract";
 import { convertToPdf, isConvertible } from "@/lib/officeConvert";
 import { logAudit } from "@/lib/audit";
@@ -334,6 +335,11 @@ export async function POST(req: NextRequest) {
     },
     include: { versions: true, category: true, owner: true, duplicateOf: true },
   });
+
+  // Videos have no text to extract on upload; they're read in the
+  // background instead (lib/videoText.ts) so search and Ask Docu AI can
+  // use what's on screen. Never blocks or fails the upload.
+  if (isVideoFile(file.name) && document.versions[0]) void processVideoVersion(document.versions[0].id);
 
   if (bypassReview) {
     return publishBypassedUpload(user, document, announceToAll, teamIds);

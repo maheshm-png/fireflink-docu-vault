@@ -112,6 +112,21 @@ export async function refreshIndexedAccess(id: string) {
   }
 }
 
+/** Replaces just the full text of an already-indexed document (e.g. once a
+ * video has been read in the background, lib/videoText.ts). */
+export async function updateIndexedText(id: string, extractedText: string) {
+  try {
+    try {
+      await client.index(INDEX).getDocument(id, { fields: ["id"] });
+    } catch {
+      return; // not indexed (not published yet): indexDocument picks the text up on publish
+    }
+    await client.index(INDEX).updateDocuments([{ id, extractedText }], { primaryKey: "id" });
+  } catch (err) {
+    console.error(`Meilisearch updateIndexedText failed for ${id} (search index may be stale):`, err);
+  }
+}
+
 export async function indexDocument(doc: {
   id: string;
   title: string;
@@ -249,6 +264,18 @@ export async function searchScored(query: string, filters: string[] = [], limit 
     console.error(`Meilisearch searchScored failed for query "${query}" (index may be unreachable):`, err);
     return { hits: [], processingTimeMs: 0, query, limit, offset: 0 };
   }
+}
+
+/**
+ * Indexed documents by id (missing ids are skipped). No access filtering
+ * here: `id` isn't a filterable attribute, so callers must check access
+ * themselves (the AI assistant re-checks every id with visibleDocumentIds).
+ */
+export async function getIndexedDocuments(ids: string[]): Promise<Record<string, any>[]> {
+  const docs = await Promise.all(
+    ids.map((id) => client.index(INDEX).getDocument(id).catch(() => null))
+  );
+  return docs.filter((d): d is Record<string, any> => !!d);
 }
 
 /** Every indexed document's id and categoryName, paged through the whole index. */
