@@ -461,7 +461,8 @@ export default function PdfHighlightViewer({
         const pdfjsLib = await import("pdfjs-dist");
         pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
-        const pdfDoc = await pdfjsLib.getDocument({ url: fetchUrl }).promise;
+        // isEvalSupported: false closes CVE-2024-4367 (a crafted PDF running script via font code).
+        const pdfDoc = await pdfjsLib.getDocument({ url: fetchUrl, isEvalSupported: false }).promise;
         if (localCancelled) return;
 
         pdfDocRef.current = pdfDoc;
@@ -1005,7 +1006,7 @@ export default function PdfHighlightViewer({
             </>
           ) : (
             <>
-              <p className="mb-2 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ff-text">
+              <p className="mb-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ff-text">
                 {activeItem.comment}
                 {activeItem.editedAt && <span className="ml-1.5 text-xs italic text-ff-textMuted">(edited)</span>}
               </p>

@@ -73,7 +73,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const share = await prisma.shareLink.findUnique({
     where: { documentId_createdById: { documentId: params.id, createdById: user.id } },
   });
-  const doc = await prisma.document.findUniqueOrThrow({ where: { id: params.id }, select: { visibility: true, downloadable: true } });
+  const doc = await prisma.document.findUnique({ where: { id: params.id }, select: { visibility: true, downloadable: true } });
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // Tells ShareModal whether to offer "View & download" at all.
   const downloadAllowed = downloadsAllowed(doc);
   if (!share) return NextResponse.json({ share: null, downloadAllowed });
@@ -126,7 +127,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
   }
 
-  const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
+  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (accessLevel === "view_download" && !downloadsAllowed(document)) {
     return NextResponse.json({ error: "This document is preview only, so its link can only allow viewing." }, { status: 400 });
   }

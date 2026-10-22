@@ -5,7 +5,7 @@ import { assertCan } from "@/lib/rbac";
 import { logAudit } from "@/lib/audit";
 import { isAllowedEmailDomain, getAllowedEmailDomains } from "@/lib/emailPolicy";
 import { sendEmail } from "@/lib/email";
-import { fireNotification } from "@/lib/notify";
+import { escapeHtml, fireNotification } from "@/lib/notify";
 import { prisma } from "@/lib/prisma";
 
 // Service-role client — only ever used server-side, never shipped to the browser.
@@ -219,9 +219,9 @@ export async function POST(req: NextRequest) {
         to: email,
         subject: "You've been invited to FireFlink Docu Vault",
         html: `
-          <p>Hello ${name},</p>
+          <p>Hello ${escapeHtml(name)},</p>
           <p>You've been invited to FireFlink Docu Vault. Use the link below to set your password and sign in.</p>
-          <p><a href="${actionLink}">Accept Invite &amp; Set Password</a></p>
+          <p><a href="${escapeHtml(actionLink)}">Accept Invite &amp; Set Password</a></p>
           <p>If you weren't expecting this, you can ignore this email.</p>
         `,
       })

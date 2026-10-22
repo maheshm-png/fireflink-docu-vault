@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import { fireNotification } from "@/lib/notify";
+import { escapeHtml, fireNotification } from "@/lib/notify";
 
 const OTP_TTL_MINUTES = 10;
 // Below this age, a repeat request for the same email is treated as a
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       to: email,
       subject: "Your FireFlink Docu Vault password reset code",
       html: `
-        <p>Hello ${user.name},</p>
+        <p>Hello ${escapeHtml(user.name)},</p>
         <p>Use the code below to verify your identity and set a new password. This code expires in ${OTP_TTL_MINUTES} minutes.</p>
         <p style="font-size: 28px; font-weight: bold; letter-spacing: 6px; margin: 24px 0;">${code}</p>
         <p>If you didn't request this, you can ignore this email, your password won't change unless this code is used.</p>

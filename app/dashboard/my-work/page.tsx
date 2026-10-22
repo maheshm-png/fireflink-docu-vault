@@ -816,7 +816,7 @@ function DownloadsTable({ rows }: { rows: { id: string; title: string; path: str
                   <div key={p}>{p}</div>
                 ))}
               </td>
-              <td className="px-4 py-3 font-mono text-xs text-ff-textMuted">Downloads folder</td>
+              <td className="px-4 py-3 text-ff-textMuted">Downloads folder</td>
               <td className="px-4 py-3 text-ff-textMuted">{r.times}</td>
               <td className="px-4 py-3 text-ff-textMuted">{r.last ? shortDate(r.last) : ""}</td>
             </tr>

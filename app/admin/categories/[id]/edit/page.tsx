@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/supabase";
 import { can } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
@@ -13,7 +13,8 @@ export default async function EditCategoryPage({ params }: { params: { id: strin
   if (!user) redirect("/login");
   if (!can(user.role, "manageCategories")) redirect("/dashboard");
 
-  const category = await prisma.category.findUniqueOrThrow({ where: { id: params.id } });
+  const category = await prisma.category.findUnique({ where: { id: params.id } });
+  if (!category || category.isSystem) notFound();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#FBF8FA]">

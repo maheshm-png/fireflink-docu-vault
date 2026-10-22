@@ -100,6 +100,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { status: 409 }
     );
   }
+  // Archiving a document that was back in review leaves its review rows
+  // open; approving one then would publish an archived document. Restoring
+  // it (unarchive) opens a fresh review round instead.
+  if (document.status === "archived") {
+    return NextResponse.json(
+      { error: "This document has been archived. A manager can restore it, which sends it back for review." },
+      { status: 409 }
+    );
+  }
 
   // Undo acts on an already-APPROVED row, not a pending one — handled before
   // the pending-row guard below, which would otherwise always reject it.
@@ -262,10 +271,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
-  const { decision, comments, announceToAll, allowFeedback, shareEnabled, downloadable, versionId } = body;
+  const { decision, announceToAll, allowFeedback, shareEnabled, downloadable, versionId } = body;
   if (!["approved", "rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
+  if (body.comments !== undefined && body.comments !== null && typeof body.comments !== "string") {
+    return NextResponse.json({ error: "Comments must be text." }, { status: 400 });
+  }
+  const comments: string | undefined = typeof body.comments === "string" ? body.comments : undefined;
   if (decision === "approved" && typeof announceToAll !== "boolean") {
     return NextResponse.json(
       { error: "announceToAll must be true or false, choose whether to notify all users before approving." },
@@ -349,10 +362,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     pickedVersionId = chosenVersion.id;
   }
 
-  await prisma.reviewRequest.update({
-    where: { id: myRequest.id },
+  // Only while still pending: a double-click or a second open tab must not
+  // record the decision twice (and publish or notify twice).
+  const claimed = await prisma.reviewRequest.updateMany({
+    where: { id: myRequest.id, status: "pending" },
     data: { status: decision, comments, resolvedAt: new Date() },
   });
+  if (claimed.count === 0) {
+    return NextResponse.json({ error: "You've already decided this review." }, { status: 409 });
+  }
 
   if (decision === "rejected") {
     // Any other reviewer still holding a pending row for this document

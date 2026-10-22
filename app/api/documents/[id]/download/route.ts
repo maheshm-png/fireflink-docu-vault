@@ -63,10 +63,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const versionParam = req.nextUrl.searchParams.get("version");
   const format = req.nextUrl.searchParams.get("format");
 
-  const document = await prisma.document.findUniqueOrThrow({
+  const document = await prisma.document.findUnique({
     where: { id: params.id },
     include: { currentVersion: true, versions: true, ...accessInclude },
   });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Soft-deleted docs are off-limits until restored, even for managers —
   // restore first if you need to look at the content again.

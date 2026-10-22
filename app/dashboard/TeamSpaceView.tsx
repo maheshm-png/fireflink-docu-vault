@@ -35,11 +35,15 @@ export default async function TeamSpaceView({
   user: AccessUser;
   searchParams: RawParams & { team?: string; view?: string; folder?: string; q?: string };
 }) {
-  const teams = await prisma.team.findMany({
-    where: seesAllRestricted(user) ? {} : { id: { in: visibleTeamIds(user) } },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
+  // Independent of each other, so one round trip.
+  const [teams, memberships] = await Promise.all([
+    prisma.team.findMany({
+      where: seesAllRestricted(user) ? {} : { id: { in: visibleTeamIds(user) } },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.userTeam.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" }, select: { teamId: true } }),
+  ]);
   const teamIds = teams.map((t) => t.id);
   // With no team picked, open the person's working team: one they contribute
   // to or manage, before a team they're only a Member of (so someone in Sales
@@ -47,9 +51,7 @@ export default async function TeamSpaceView({
   const worksIn = (t: { id: string }) => user.teamRoles[t.id] === "contributor" || user.teamRoles[t.id] === "manager";
   // Default team: the first team they were added to (where they work, not
   // a view-only one), so it doesn't change when they join another team.
-  const joinedOrder = (
-    await prisma.userTeam.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" }, select: { teamId: true } })
-  ).map((m) => m.teamId);
+  const joinedOrder = memberships.map((m) => m.teamId);
   const byJoined = [...teams].sort((a, b) => {
     const ia = joinedOrder.indexOf(a.id);
     const ib = joinedOrder.indexOf(b.id);
@@ -78,7 +80,7 @@ export default async function TeamSpaceView({
     : { teamAccess: { some: { teamId: { in: scopeTeamIds } } } };
 
   const section = `team:${activeTeam?.id ?? "all"}`;
-  const [docs, countsByTeam, folderCounts, savedFilters] = await Promise.all([
+  const [docs, countsByTeam, folderCounts, savedFilters, newDocs] = await Promise.all([
     scopeTeamIds.length
       ? prisma.document.findMany({
           where: { ...liveWhere, ...folderWhere },
@@ -108,6 +110,8 @@ export default async function TeamSpaceView({
         })
       : Promise.resolve([]),
     getSavedFilters(user.id, section),
+    // "New" notices for the open team only (lib/newDocuments.ts).
+    activeTeam ? newDocumentsFor(user, { kind: "team", teamId: activeTeam.id }) : Promise.resolve(null),
   ]);
 
   // The search box matches the file's text too, so it runs here rather than
@@ -209,9 +213,6 @@ export default async function TeamSpaceView({
       </div>
     );
   }
-
-  // "New" notices for the open team only (lib/newDocuments.ts).
-  const newDocs = activeTeam ? await newDocumentsFor(user, { kind: "team", teamId: activeTeam.id }) : null;
 
   const tab = (active: boolean) =>
     `-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${

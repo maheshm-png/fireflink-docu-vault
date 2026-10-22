@@ -15,7 +15,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import {
   canBypassReviewFor,
-  contributesToTeam,
+  documentRole,
   documentAccessWhere,
   eligibleReviewerWhere,
   passesTeamGate,
@@ -46,16 +46,32 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // is a 404 here, same as one that doesn't exist (lib/access.ts).
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const doc = await prisma.document.findUniqueOrThrow({
+  const doc = await prisma.document.findUnique({
     where: { id: params.id },
-    include: { category: true, versions: true, teamAccess: { select: { teamId: true } }, duplicateOf: true },
+    include: {
+      category: true,
+      versions: true,
+      teamAccess: { select: { teamId: true } },
+      duplicateOf: true,
+      reviewRequests: { select: { reviewerId: true } },
+      globalRequests: { select: { status: true, decidedById: true } },
+    },
   });
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // The org role allows editing, or (for a team document) a contributor or
-  // manager role in one of its teams does.
-  const teamCanEdit = doc.visibility === "restricted" && doc.teamAccess.some((a) => contributesToTeam(user, a.teamId));
-  if (!can(user.role, "editOwnUpload") && !teamCanEdit) {
-    return NextResponse.json({ error: `Forbidden: role "${user.role}" cannot "editOwnUpload"` }, { status: 403 });
+  // Same rule as the document page's Upload New Version button
+  // (app/dashboard/documents/[id]/page.tsx canUploadVersion): the role on
+  // this document (lib/access.ts documentRole: org role for Everyone
+  // documents, team role for team documents, manager rights only when
+  // involved) must allow editing, and the caller must be its uploader, its
+  // owner, or someone with manager rights on it. Without the second half,
+  // any contributor could replace anyone's published document.
+  const docRole = documentRole(user, doc);
+  const mayReplace =
+    can(docRole, "editOwnUpload") &&
+    (doc.uploadedById === user.id || doc.ownerId === user.id || docRole === "manager" || docRole === "superadmin");
+  if (!mayReplace) {
+    return NextResponse.json({ error: "Only this document's uploader or a manager who reviewed it can upload a new version." }, { status: 403 });
   }
 
   if (doc.deletedAt) {
@@ -90,8 +106,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const form = await req.formData();
-  const file = form.get("file") as File;
-  const changelog = form.get("changelog") as string;
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return NextResponse.json({ error: "Choose a file to upload." }, { status: 400 });
+  }
+  const changelog = typeof form.get("changelog") === "string" ? (form.get("changelog") as string) : null;
   const confirmDuplicate = form.get("confirmDuplicate") === "true";
   const confirmedDuplicateOfId = form.get("duplicateOfId") as string | null;
   // "No review needed" (manager only): publish this version directly, same
@@ -207,14 +226,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const [extractedText, , pdfBuffer] = await Promise.all([
     extractText(buffer, file.name),
-    uploadFile(storageKey, buffer, file.type),
+    uploadFile(storageKey, buffer),
     isConvertible(file.name) ? convertToPdf(buffer, file.name) : Promise.resolve(null),
   ]);
 
   let previewPdfPath: string | null = null;
   if (pdfBuffer) {
     previewPdfPath = `${storageKey}.preview.pdf`;
-    await uploadFile(previewPdfPath, pdfBuffer, "application/pdf");
+    await uploadFile(previewPdfPath, pdfBuffer);
   }
 
   const version = await prisma.documentVersion.create({

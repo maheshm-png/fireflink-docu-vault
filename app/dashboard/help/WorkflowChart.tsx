@@ -142,7 +142,7 @@ export function WorkflowChart({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-semibold">{node.label}</span>
                       {node.note && (
-                        <span className="mt-0.5 block truncate text-[10.5px] font-normal text-ff-textMuted">{node.note}</span>
+                        <span className="mt-0.5 block truncate text-[11px] font-normal text-ff-textMuted">{node.note}</span>
                       )}
                     </span>
                   </button>

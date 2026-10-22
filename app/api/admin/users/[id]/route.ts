@@ -32,7 +32,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }
 
-  const target = await prisma.user.findUniqueOrThrow({ where: { id: params.id } });
+  const target = await prisma.user.findUnique({ where: { id: params.id } });
+  if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { role, teamIds, teamRoles, seesAllTeams, viewTeamIds, reportsToId, isActive, password } = await req.json();
   const data: Prisma.UserUncheckedUpdateInput = {};
 

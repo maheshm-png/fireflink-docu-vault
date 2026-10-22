@@ -41,7 +41,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const { action, days, versionId } = await req.json();
-  const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
+  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (document.deletedAt) {
     return NextResponse.json({ error: "This document has been deleted" }, { status: 400 });

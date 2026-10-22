@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPreviewUrl, getFileBuffer } from "@/lib/storage";
 import { prisma } from "@/lib/prisma";
-import { shareLinkUsable } from "@/lib/access";
+import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
 
 // GET /api/share/:token/view?format=pdf|original — public, no auth. Used by
 // app/share/[token]/page.tsx's inline <iframe>/<video>. Deliberately
@@ -33,6 +33,14 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   // and format=original IS the PDF).
   const isPdf = format === "pdf" || share.document.docType === "pdf";
 
+  // The share page only ever previews a PDF or a video. Any other original
+  // (a .pptx, .docx, .xlsx) would just be the file itself, which a view-only
+  // link must not hand out (see /download).
+  const canDownload = share.accessLevel === "view_download" && downloadsAllowed(share.document);
+  if (!isPdf && share.document.docType !== "video" && !canDownload) {
+    return NextResponse.json({ error: "Preview not available for this file." }, { status: 404 });
+  }
+
   // PDF is proxied through this server rather than redirected to a
   // presigned storage URL — a presigned link, once issued, keeps working
   // on its own for its full TTL (lib/storage.ts's PRESIGNED_URL_TTL_SECONDS)
@@ -54,6 +62,6 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     });
   }
 
-  const url = await getPreviewUrl(key);
+  const url = await getPreviewUrl(key, share.document.docType);
   return NextResponse.redirect(url);
 }

@@ -20,7 +20,13 @@ async function signedInUserId(): Promise<string | null> {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const { data } = await supabase.auth.getSession();
-  return data.session?.user.id ?? null;
+  const token = data.session?.access_token;
+  if (!token) return null;
+  // The cookie alone is unverified (anyone can write one naming any user),
+  // so the token is checked with Supabase Auth before an open is credited
+  // to a colleague by name.
+  const { data: verified } = await supabase.auth.getUser(token);
+  return verified.user?.id ?? null;
 }
 
 // Silent open/download tracking for share links (ShareLinkActivity), shown

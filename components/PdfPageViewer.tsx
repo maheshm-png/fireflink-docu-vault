@@ -259,7 +259,8 @@ export default function PdfPageViewer({
       try {
         const pdfjsLib = await import("pdfjs-dist");
         pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
-        const pdfDoc = await pdfjsLib.getDocument({ url }).promise;
+        // isEvalSupported: false closes CVE-2024-4367 (a crafted PDF running script via font code).
+        const pdfDoc = await pdfjsLib.getDocument({ url, isEvalSupported: false }).promise;
         if (localCancelled) return;
         pdfDocRef.current = pdfDoc;
         setPageCount(pdfDoc.numPages);

@@ -1,5 +1,28 @@
+// Sent on every response. Frames are limited to this site itself (the share
+// page and preview dialogs iframe this app's own PDF routes), which stops
+// other sites from framing the app to trick clicks. Referrer stays on this
+// origin so share-link tokens in a URL never reach another site.
+const securityHeaders = [
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self'; base-uri 'self'; object-src 'none'" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "same-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  // Ignored by browsers over plain http (local/LAN dev), enforced behind Caddy's https.
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
+  // The only next/image use is the small local logo files (components/Logo.tsx),
+  // so the on-the-fly image optimizer isn't needed. Leaving it off also keeps
+  // its endpoint (/_next/image), the subject of several Next.js 14 advisories,
+  // out of reach.
+  images: { unoptimized: true },
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   // The site root never renders anything: it goes straight to Docu Vault's sign-in.
   // Done here (a real 307) because app/loading.tsx makes a page-level redirect() a 200.
   async redirects() {

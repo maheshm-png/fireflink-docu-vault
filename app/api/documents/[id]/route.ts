@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // is a 404 here, same as one that doesn't exist (lib/access.ts).
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const document = await prisma.document.findUniqueOrThrow({
+  const document = await prisma.document.findUnique({
     where: { id: params.id },
     include: {
       category: true,
@@ -30,6 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       ...accessInclude,
     },
   });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Same "is there a real, currently-live approved version" check the
   // dashboard page uses (app/dashboard/documents/[id]/page.tsx's
@@ -108,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // is a 404 here, same as one that doesn't exist (lib/access.ts).
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const document = await prisma.document.findUniqueOrThrow({
+  const document = await prisma.document.findUnique({
     where: { id: params.id },
     include: {
       category: true,
@@ -117,6 +118,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       globalRequests: { select: { status: true, decidedById: true } },
     },
   });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (document.deletedAt) {
     return NextResponse.json({ error: "This document has been deleted" }, { status: 400 });
@@ -134,7 +136,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { title, tags, metadata, categoryId, extraCategoryIds } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  const { metadata, categoryId, extraCategoryIds } = body;
+  const title = typeof body.title === "string" ? body.title.trim() : body.title;
+  const tags = Array.isArray(body.tags) ? body.tags.map((t: unknown) => (typeof t === "string" ? t.trim() : t)).filter(Boolean) : body.tags;
+  if (title !== undefined && (typeof title !== "string" || !title)) {
+    return NextResponse.json({ error: "Title can't be empty." }, { status: 400 });
+  }
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== "string"))) {
+    return NextResponse.json({ error: "Tags must be a list of words." }, { status: 400 });
+  }
+  if (metadata !== undefined && metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) {
+    return NextResponse.json({ error: "Malformed metadata." }, { status: 400 });
+  }
 
   // Moving to another main category, and "Also show in" extra categories.
   // Both optional; no new review, since the file doesn't change. The main
@@ -264,7 +278,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   // is a 404 here, same as one that doesn't exist (lib/access.ts).
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const document = await prisma.document.findUniqueOrThrow({ where: { id: params.id } });
+  const document = await prisma.document.findUnique({ where: { id: params.id } });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (document.deletedAt) {
     return NextResponse.json({ error: "This document has already been deleted" }, { status: 400 });

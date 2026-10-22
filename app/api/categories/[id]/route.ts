@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { assertCan } from "@/lib/rbac";
-import { dedupeFieldIds, type CategoryFormField } from "@/lib/formSchema";
+import { dedupeFieldIds, isFormSchema, parseReviewCycleDays, type CategoryFormField } from "@/lib/formSchema";
 import { prisma } from "@/lib/prisma";
 import { allIndexedCategoryNames, setIndexedCategoryName } from "@/lib/search";
 import { moveCategoryDocuments, resolveMoveTarget } from "@/lib/categoryMove";
@@ -11,7 +11,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const category = await prisma.category.findUniqueOrThrow({ where: { id: params.id } });
+  const category = await prisma.category.findUnique({ where: { id: params.id } });
+  if (!category) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(category);
 }
 
@@ -27,12 +28,33 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }
 
-  const { name, description, reviewCycleDays, formSchema } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  const { description, reviewCycleDays, formSchema } = body;
+  const name = typeof body.name === "string" ? body.name.trim() : body.name;
+  if (name !== undefined && (typeof name !== "string" || !name)) {
+    return NextResponse.json({ error: "Category name is required" }, { status: 400 });
+  }
+  if (description !== undefined && description !== null && typeof description !== "string") {
+    return NextResponse.json({ error: "Description must be text." }, { status: 400 });
+  }
+  if (reviewCycleDays !== undefined && parseReviewCycleDays(reviewCycleDays) === undefined) {
+    return NextResponse.json({ error: "Review cycle must be a whole number of days (1 to 3650), or none." }, { status: 400 });
+  }
+  if (formSchema !== undefined && formSchema !== null && !isFormSchema(formSchema)) {
+    return NextResponse.json({ error: "The upload form's fields are malformed." }, { status: 400 });
+  }
   const fields: CategoryFormField[] | undefined = formSchema ? dedupeFieldIds(formSchema) : undefined;
 
-  const before = await prisma.category.findUniqueOrThrow({ where: { id: params.id }, select: { name: true, isSystem: true } });
+  const before = await prisma.category.findUnique({ where: { id: params.id }, select: { name: true, isSystem: true } });
+  if (!before) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // The built-in team category (lib/teamCategory.ts) isn't editable.
   if (before.isSystem) return NextResponse.json({ error: "This built-in category can't be changed." }, { status: 400 });
+  if (name !== undefined && name !== before.name) {
+    const clash = await prisma.category.findUnique({ where: { name }, select: { id: true } });
+    if (clash && clash.id !== params.id) {
+      return NextResponse.json({ error: "A category with that name already exists." }, { status: 409 });
+    }
+  }
 
   const category = await prisma.category.update({
     where: { id: params.id },

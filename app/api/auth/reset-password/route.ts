@@ -21,10 +21,11 @@ function hashCode(code: string) {
 // POST /api/auth/reset-password — verify the OTP issued by
 // /api/auth/forgot-password and apply the new password.
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { code, password } = body;
+  const body = await req.json().catch(() => ({}));
+  const { password } = body;
+  const code = typeof body.code === "string" ? body.code.trim() : "";
   // Same normalising as forgot-password, so the code it sent is found.
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!email || !code || !password) {
     return NextResponse.json({ error: "Email, code, and new password are required." }, { status: 400 });
   }
@@ -40,13 +41,26 @@ export async function POST(req: NextRequest) {
   if (!otp || otp.expiresAt < new Date()) {
     return NextResponse.json({ error: "That code has expired. Request a new one." }, { status: 400 });
   }
-  if (otp.attempts >= MAX_ATTEMPTS) {
+  // Every try is counted before the code is compared, in one conditional
+  // update, so many guesses sent at once can't all slip in under the limit.
+  const counted = await prisma.passwordResetOtp.updateMany({
+    where: { id: otp.id, used: false, attempts: { lt: MAX_ATTEMPTS } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (counted.count === 0) {
     return NextResponse.json({ error: "Too many incorrect attempts. Request a new code." }, { status: 400 });
   }
 
-  if (hashCode(code) !== otp.codeHash) {
-    await prisma.passwordResetOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
+  const expected = Buffer.from(otp.codeHash, "hex");
+  const given = Buffer.from(hashCode(code), "hex");
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
     return NextResponse.json({ error: "Incorrect code." }, { status: 400 });
+  }
+
+  // Claim the code so it can only ever reset the password once.
+  const claimed = await prisma.passwordResetOtp.updateMany({ where: { id: otp.id, used: false }, data: { used: true } });
+  if (claimed.count === 0) {
+    return NextResponse.json({ error: "That code has already been used. Request a new one." }, { status: 400 });
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
@@ -58,13 +72,16 @@ export async function POST(req: NextRequest) {
   // must_change_password flag from an earlier admin-set one no longer applies.
   // updateUserById also THROWS (rather than returning an error) when user.id
   // isn't a valid UUID, so it's wrapped, and nothing here may escape as
-  // Next's HTML 500 page.
+  // Next's HTML 500 page. On failure the code is handed back, so a rejected
+  // password (too weak) can be retried with the same code.
+  const releaseCode = () => prisma.passwordResetOtp.update({ where: { id: otp.id }, data: { used: false } }).catch(() => {});
   try {
     const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
       password,
       app_metadata: { must_change_password: false },
     });
     if (error) {
+      await releaseCode();
       // A 4xx from Supabase is about the password itself (too weak, same as
       // the old one) and worth showing. Anything else is infrastructure, e.g.
       // an unreachable or misrouted Supabase URL, whose raw message ("Unexpected
@@ -77,14 +94,13 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (e) {
+    await releaseCode();
     console.error(`reset-password: could not update auth user for ${email} (User.id=${user.id})`, e);
     return NextResponse.json(
       { error: "We couldn't reset this password. Please contact docuvault@fireflink.com." },
       { status: 500 }
     );
   }
-
-  await prisma.passwordResetOtp.update({ where: { id: otp.id }, data: { used: true } });
 
   return NextResponse.json({ message: "Password updated." });
 }

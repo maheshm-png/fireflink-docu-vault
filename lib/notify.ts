@@ -137,7 +137,7 @@ export async function notifyReviewDecision(params: {
         <p><strong>Inline Comments:</strong></p>
         <ul>
           ${params.inlineComments
-            .map((c) => (c.highlightedText ? `<li>On "${c.highlightedText}": ${c.comment}</li>` : `<li>${c.comment}</li>`))
+            .map((c) => (c.highlightedText ? `<li>On "${escapeHtml(c.highlightedText)}": ${escapeHtml(c.comment)}</li>` : `<li>${escapeHtml(c.comment)}</li>`))
             .join("")}
         </ul>
       `
@@ -146,9 +146,9 @@ export async function notifyReviewDecision(params: {
     to: params.uploaderEmail,
     subject: `Document ${params.decision}: ${params.documentTitle}`,
     html: `
-      <p>Dear ${params.uploaderName},</p>
-      <p>Your submission, "<strong>${params.documentTitle}</strong>," ${decisionText}.</p>
-      ${params.comments ? `<p><strong>Reviewer Comments:</strong> ${params.comments}</p>` : ""}
+      <p>Dear ${escapeHtml(params.uploaderName)},</p>
+      <p>Your submission, "<strong>${escapeHtml(params.documentTitle)}</strong>," ${decisionText}.</p>
+      ${params.comments ? `<p><strong>Reviewer Comments:</strong> ${escapeHtml(params.comments)}</p>` : ""}
       ${inlineCommentsHtml}
       <p>You may view the document using the link below.</p>
       <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Document</a></p>
@@ -312,12 +312,12 @@ export async function notifyManagerReviewNeeded(params: {
     to: params.reviewerEmail,
     subject: `Review Required: ${params.documentTitle}`,
     html: `
-      <p>Dear ${params.reviewerName},</p>
+      <p>Dear ${escapeHtml(params.reviewerName)},</p>
       <p>${submissionType} has been submitted and requires your review.</p>
       <p>
-        <strong>Title:</strong> ${params.documentTitle}<br/>
-        <strong>Category:</strong> ${params.categoryName}<br/>
-        <strong>Submitted By:</strong> ${params.uploaderName}
+        <strong>Title:</strong> ${escapeHtml(params.documentTitle)}<br/>
+        <strong>Category:</strong> ${escapeHtml(params.categoryName)}<br/>
+        <strong>Submitted By:</strong> ${escapeHtml(params.uploaderName)}
       </p>
       <p>Please review the submission using the link below.</p>
       <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review Document</a></p>
@@ -379,9 +379,9 @@ export async function notifyReviewerAssigned(params: {
         ? `Review Reassigned to You: ${params.documentTitle}`
         : `Second Opinion Requested: ${params.documentTitle}`,
     html: `
-      <p>Dear ${params.reviewerName},</p>
-      <p>${params.assignedByName} ${verb}.</p>
-      <p><strong>Title:</strong> ${params.documentTitle}</p>
+      <p>Dear ${escapeHtml(params.reviewerName)},</p>
+      <p>${escapeHtml(params.assignedByName)} ${verb}.</p>
+      <p><strong>Title:</strong> ${escapeHtml(params.documentTitle)}</p>
       <p>Please review the document using the link below.</p>
       <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Review Document</a></p>
     `,
@@ -413,8 +413,8 @@ export async function notifyNewVersionAvailable(params: {
         to: r.email,
         subject: `New Version Available: ${params.documentTitle}`,
         html: `
-          <p>Dear ${r.name},</p>
-          <p>A new version (${params.versionLabel}) of "<strong>${params.documentTitle}</strong>" is now available. Please note that the copy you previously downloaded may no longer be current.</p>
+          <p>Dear ${escapeHtml(r.name)},</p>
+          <p>A new version (${escapeHtml(params.versionLabel)}) of "<strong>${escapeHtml(params.documentTitle)}</strong>" is now available. Please note that the copy you previously downloaded may no longer be current.</p>
           <p>We recommend downloading the latest version at your earliest convenience.</p>
           <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">View Latest Version</a></p>
         `,
@@ -551,8 +551,8 @@ export async function notifySeesAllComment(params: {
         to: m.email,
         subject: `Comment from outside the team: ${params.documentTitle}`,
         html: `
-          <p>Dear ${m.name},</p>
-          <p>${params.authorName} (who sees all teams) commented on your team's document "<strong>${params.documentTitle}</strong>":</p>
+          <p>Dear ${escapeHtml(m.name)},</p>
+          <p>${escapeHtml(params.authorName)} (who sees all teams) commented on your team's document "<strong>${escapeHtml(params.documentTitle)}</strong>":</p>
           <blockquote>${escapeHtml(params.comment)}</blockquote>
           <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
         `,
@@ -587,8 +587,8 @@ export async function notifyEveryoneRequested(params: {
         to: a.email,
         subject: `Request for Everyone: ${params.documentTitle}`,
         html: `
-          <p>Dear ${a.name},</p>
-          <p>${params.requestedByName} asked for the team document "<strong>${params.documentTitle}</strong>" to be visible to everyone in the organization.</p>
+          <p>Dear ${escapeHtml(a.name)},</p>
+          <p>${escapeHtml(params.requestedByName)} asked for the team document "<strong>${escapeHtml(params.documentTitle)}</strong>" to be visible to everyone in the organization.</p>
           <p>Reason: ${escapeHtml(params.reason)}</p>
           <p>As the Global approver, you can approve it or send it back from My Work or the document's page.</p>
           <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
@@ -627,8 +627,8 @@ export async function notifyEveryoneDecided(params: {
     to: params.requester.email,
     subject: `Request for Everyone ${params.approved ? "Approved" : "Sent Back"}: ${params.documentTitle}`,
     html: `
-      <p>Dear ${params.requester.name},</p>
-      <p>${params.decidedByName} ${verdict} your request to make "<strong>${params.documentTitle}</strong>" visible to everyone.${
+      <p>Dear ${escapeHtml(params.requester.name)},</p>
+      <p>${escapeHtml(params.decidedByName)} ${verdict} your request to make "<strong>${escapeHtml(params.documentTitle)}</strong>" visible to everyone.${
         params.approved ? " It is now visible to the whole organization." : " It stays visible to its teams only."
       }</p>
       ${params.comment ? `<p>Comment: ${escapeHtml(params.comment)}</p>` : ""}
@@ -660,8 +660,8 @@ export async function notifyMergeRequested(params: {
     to: params.approver.email,
     subject: `Merge Request: ${params.targetTitle}`,
     html: `
-      <p>Dear ${params.approver.name},</p>
-      <p>${params.requestedByName} asks to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>". If you approve, "${escapeHtml(params.sourceTitle)}" is removed and "${escapeHtml(params.targetTitle)}" is kept.</p>
+      <p>Dear ${escapeHtml(params.approver.name)},</p>
+      <p>${escapeHtml(params.requestedByName)} asks to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>". If you approve, "${escapeHtml(params.sourceTitle)}" is removed and "${escapeHtml(params.targetTitle)}" is kept.</p>
       <p>You can approve or decline it from My Work or the document's page.</p>
       <p><a href="${APP_URL}/dashboard/documents/${params.targetId}">Open Document</a></p>
     `,
@@ -698,13 +698,13 @@ export async function notifyMergeDecided(params: {
     to: params.requester.email,
     subject: `Merge ${params.approved ? "Approved" : "Declined"}: ${params.sourceTitle}`,
     html: `
-      <p>Dear ${params.requester.name},</p>
-      <p>${params.decidedByName} ${params.approved ? "approved" : "declined"} your request to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>".</p>
+      <p>Dear ${escapeHtml(params.requester.name)},</p>
+      <p>${escapeHtml(params.decidedByName)} ${params.approved ? "approved" : "declined"} your request to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>".</p>
       <p><a href="${APP_URL}/dashboard/documents/${documentId}">Open Document</a></p>
     `,
   });
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+export function escapeHtml(text: string | null | undefined): string {
+  return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

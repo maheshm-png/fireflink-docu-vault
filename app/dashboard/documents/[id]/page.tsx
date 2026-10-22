@@ -190,8 +190,9 @@ export default async function DocumentDetailPage({
 
   // Neither of these depends on the other, so they run together — same
   // "don't serialize independent round-trips" reasoning as the Promise.all
-  // above.
-  const [inlineComments, myInlineComments] = await Promise.all([
+  // above. Started below, in the one batch with every other query on this
+  // page that only needs the document itself (see pageQueries).
+  const inlineCommentsQuery = () => Promise.all([
     // Every round's inline (highlight-and-comment) feedback, for anyone who
     // can see the trail at all (same audience as reviewRequests.comments
     // above) — previously only sent in the batched decision email/GChat
@@ -437,8 +438,11 @@ export default async function DocumentDetailPage({
   // FeedbackManagement.tsx's toggle) — turning it off to stop taking new
   // comments shouldn't also hide what's already been left.
   const feedbackVisible = !isDeleted && isPubliclyVisible;
-  const feedback = feedbackVisible
-    ? await prisma.documentFeedback.findMany({
+  // Started here, awaited in the one batch below (pageQueries): each query
+  // after the access check depends only on the document, never on another
+  // query, and run one after another they cost a round trip each.
+  const feedbackQuery = feedbackVisible
+    ? prisma.documentFeedback.findMany({
         where: { documentId: document.id },
         include: {
           user: { select: { name: true } },
@@ -448,7 +452,7 @@ export default async function DocumentDetailPage({
         },
         orderBy: { createdAt: "asc" },
       })
-    : [];
+    : Promise.resolve([]);
 
   // Who a feedback author can tag (components/DocumentFeedback.tsx's compose
   // picker) — this document's contributor, plus every distinct reviewer
@@ -493,31 +497,22 @@ export default async function DocumentDetailPage({
   const extendsToAnyTeam = user.role === "superadmin" || managesDocumentTeam(user, document);
   const addableTeamIds = uploadableTeamIds(user);
   const currentAccessTeamIds = document.teamAccess.map((a) => a.teamId);
-  const teamOptions = canEditAccess
-    ? (
-        await prisma.team.findMany({
-          where: extendsToAnyTeam || !addableTeamIds ? {} : { id: { in: [...addableTeamIds, ...currentAccessTeamIds] } },
-          orderBy: { name: "asc" },
-          select: { id: true, name: true },
-        })
-      ).map((t) => ({
-        ...t,
-        selectable: currentAccessTeamIds.includes(t.id)
-          ? user.role === "superadmin" ||
-            user.teamIds.includes(t.id) ||
-            document.teamAccess.some((a) => a.teamId === t.id && a.grantedById === user.id)
-          : extendsToAnyTeam || !addableTeamIds || addableTeamIds.includes(t.id),
-      }))
-    : [];
+  const teamOptionsQuery = canEditAccess
+    ? prisma.team.findMany({
+        where: extendsToAnyTeam || !addableTeamIds ? {} : { id: { in: [...addableTeamIds, ...currentAccessTeamIds] } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      })
+    : Promise.resolve([]);
   // "Request for Everyone": team managers raise it from the Manage tab once
   // the document is published; the Global approver decides it above the tabs.
   const showEveryoneRequest = !isDeleted && document.status === "published" && canRequestEveryone(user, document);
   const showEveryoneDecision =
     !isDeleted && decidesEveryoneRequests(user) && Boolean(pendingEveryoneRequest) && pendingEveryoneRequest?.requestedById !== user.id;
   // Shown to the team manager before they send a Request for Everyone.
-  const globalApproverName = showEveryoneRequest
-    ? (await prisma.user.findFirst({ where: { isGlobalApprover: true, role: "manager", isActive: true }, select: { name: true } }))?.name ?? null
-    : null;
+  const globalApproverQuery = showEveryoneRequest
+    ? prisma.user.findFirst({ where: { isGlobalApprover: true, role: "manager", isActive: true }, select: { name: true } })
+    : Promise.resolve(null);
   const everyonePending = pendingEveryoneRequest
     ? {
         requestedByName: pendingEveryoneRequest.requestedBy.name,
@@ -538,21 +533,15 @@ export default async function DocumentDetailPage({
   // Purge countdown — only meaningful (and only shown) once the document is
   // within 20 days of being permanently removed, so a fresh delete doesn't
   // immediately show a "29 days left" label nobody needs yet.
-  const settings = isDeleted ? await getAppSettings() : null;
-  const daysUntilPurge = isDeleted && document.deletedAt
-    ? Math.ceil(
-        settings!.deletedDocRetentionDays - (Date.now() - document.deletedAt.getTime()) / (1000 * 60 * 60 * 24)
-      )
-    : null;
-  const showPurgeCountdown = daysUntilPurge !== null && daysUntilPurge <= 20;
+  const settingsQuery = isDeleted ? getAppSettings() : Promise.resolve(null);
 
   const fields = (document.category.formSchema as unknown as CategoryFormField[]) ?? [];
   // For the edit form's category picker (main category + "Also show in").
   // Team documents have no category to change (lib/teamCategory.ts).
-  const allCategories =
+  const allCategoriesQuery =
     canEdit && document.visibility !== "restricted"
-      ? await prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" }, select: { id: true, name: true, formSchema: true } })
-      : [];
+      ? prisma.category.findMany({ where: { isSystem: false }, orderBy: { name: "asc" }, select: { id: true, name: true, formSchema: true } })
+      : Promise.resolve([]);
   const metadata = (document.metadata as Record<string, unknown>) ?? {};
 
   // Same visibility conditions the old flat layout used for each section —
@@ -567,12 +556,9 @@ export default async function DocumentDetailPage({
   const reviewActionsVisible = canReview && Boolean(myPendingReview);
   // The approving manager may restrict the document to ANY team (the review
   // route's checkAccessChange asApprover), so every team is offered.
-  const approvalTeamOptions = reviewActionsVisible
-    ? (await prisma.team.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })).map((t) => ({
-        ...t,
-        selectable: true,
-      }))
-    : [];
+  const approvalTeamsQuery = reviewActionsVisible
+    ? prisma.team.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })
+    : Promise.resolve([]);
   const rejectedExplanationVisible =
     !isDeleted &&
     !document.externalUrl &&
@@ -593,7 +579,6 @@ export default async function DocumentDetailPage({
   // read — not just document.feedbackEnabled alone, since turning that off
   // (FeedbackManagement.tsx) only stops new submissions, it shouldn't hide
   // a tab that still has existing feedback worth reading.
-  const hasFeedbackTab = feedbackVisible && (document.feedbackEnabled || leadershipComment || feedback.length > 0);
   // Always shown for any non-link document — its CONTENTS vary instead
   // (versionsVisibleToViewer below, keyed off canSeeReviewTrail): a
   // stakeholder sees the real full history, a base "user" (or a contributor
@@ -611,24 +596,39 @@ export default async function DocumentDetailPage({
     !isDeleted && document.visibility === "restricted"
       ? document.teamAccess.filter((a) => canFileIntoFolders(user, a.teamId))
       : [];
-  const folderOptions = folderTeams.length
-    ? await prisma.teamFolder.findMany({
+  const folderOptionsQuery = folderTeams.length
+    ? prisma.teamFolder.findMany({
         where: { teamId: { in: folderTeams.map((a) => a.teamId) } },
         orderBy: { name: "asc" },
         select: { id: true, name: true, teamId: true },
       })
-    : [];
-  const folderControls = folderTeams.map((a) => ({
-    teamId: a.teamId,
-    teamName: a.team.name,
-    folderId: a.folderId,
-    folders: folderOptions.filter((f) => f.teamId === a.teamId).map(({ id, name }) => ({ id, name })),
-  }));
+    : Promise.resolve([]);
 
   // Merge (lib/merge.ts): this document into another, and requests from
   // others to merge into this one that wait on this viewer.
   const canMerge = !isDeleted && canStartMerge(user, docRole, document);
-  const [pendingMergeOut, incomingMerges] = await Promise.all([
+
+  // pageQueries: everything above, in one round trip instead of one each.
+  const [
+    [inlineComments, myInlineComments],
+    feedback,
+    teamRows,
+    globalApprover,
+    settings,
+    allCategories,
+    approvalTeams,
+    folderOptions,
+    pendingMergeOut,
+    incomingMerges,
+  ] = await Promise.all([
+    inlineCommentsQuery(),
+    feedbackQuery,
+    teamOptionsQuery,
+    globalApproverQuery,
+    settingsQuery,
+    allCategoriesQuery,
+    approvalTeamsQuery,
+    folderOptionsQuery,
     canMerge
       ? prisma.mergeRequest.findFirst({
           where: { sourceId: document.id, status: "pending" },
@@ -644,6 +644,29 @@ export default async function DocumentDetailPage({
         }),
   ]);
   const visibleMergeSources = await visibleDocumentIds(user, incomingMerges.map((m) => m.sourceId));
+
+  const teamOptions = teamRows.map((t) => ({
+    ...t,
+    selectable: currentAccessTeamIds.includes(t.id)
+      ? user.role === "superadmin" ||
+        user.teamIds.includes(t.id) ||
+        document.teamAccess.some((a) => a.teamId === t.id && a.grantedById === user.id)
+      : extendsToAnyTeam || !addableTeamIds || addableTeamIds.includes(t.id),
+  }));
+  const approvalTeamOptions = approvalTeams.map((t) => ({ ...t, selectable: true }));
+  const globalApproverName = globalApprover?.name ?? null;
+  const daysUntilPurge =
+    settings && document.deletedAt
+      ? Math.ceil(settings.deletedDocRetentionDays - (Date.now() - document.deletedAt.getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+  const showPurgeCountdown = daysUntilPurge !== null && daysUntilPurge <= 20;
+  const hasFeedbackTab = feedbackVisible && (document.feedbackEnabled || leadershipComment || feedback.length > 0);
+  const folderControls = folderTeams.map((a) => ({
+    teamId: a.teamId,
+    teamName: a.team.name,
+    folderId: a.folderId,
+    folders: folderOptions.filter((f) => f.teamId === a.teamId).map(({ id, name }) => ({ id, name })),
+  }));
 
   const hasManageTab =
     canMerge ||

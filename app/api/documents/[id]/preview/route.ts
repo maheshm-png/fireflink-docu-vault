@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
-import { getPreviewUrl, getFileBuffer } from "@/lib/storage";
+import { getPreviewUrl, getFileBuffer, isInlineSafe } from "@/lib/storage";
 import { everApprovedVersionIds } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
-import { accessInclude, teamAllows, involvedInReview } from "@/lib/access";
+import { accessInclude, teamAllows, involvedInReview, downloadsAllowed } from "@/lib/access";
 
 // GET /api/documents/:id/preview?version=3 — same access rules as
 // /download (see that route), but resolves an inline-disposition presigned
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // route fires on every document open, so not serializing the two saves a
   // full round-trip on very high-frequency traffic.
   const [document, reviewRequests] = await Promise.all([
-    prisma.document.findUniqueOrThrow({
+    prisma.document.findUnique({
       where: { id: params.id },
       include: { currentVersion: true, versions: true, ...accessInclude },
     }),
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }),
   ]);
 
-  if (document.deletedAt) {
+  if (!document || document.deletedAt) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const approvedVersionIds = everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt);
@@ -86,7 +86,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // one, or whatever's current), never one still pending or rejected. The
   // uploader and its reviewers can open the version under review, whatever
   // their org role (a team Manager is often an org User).
-  if (!involvedInReview(user, document, reviewRequests) && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
+  const involved = involvedInReview(user, document, reviewRequests);
+  if (!involved && !approvedVersionIds.has(version.id) && document.currentVersionId !== version.id) {
     return NextResponse.json({ error: "Only published versions are available to preview." }, { status: 403 });
   }
 
@@ -94,6 +95,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // exists — accurate rendering through the existing PDF viewer instead of
   // the file's native (often unrenderable-inline) format.
   const key = version.previewPdfPath || version.filePath;
+  const isPdf = Boolean(version.previewPdfPath) || document.docType === "pdf";
+
+  // With no converted PDF, an Office file has nothing to show in a browser:
+  // this route would just hand over the original file, which a preview-only
+  // or archived document must not do (see /download). Its slides and sheets
+  // preview through /pptx-preview and /spreadsheet-preview instead.
+  const browserViewable = isPdf || document.docType === "video" || isInlineSafe(key);
+  const mayHaveFile = involved || (downloadsAllowed(document) && document.status !== "archived");
+  if (!browserViewable && !mayHaveFile) {
+    return NextResponse.json({ error: "Preview isn't available for this file." }, { status: 403 });
+  }
 
   // Logging this view doesn't need to block the actual preview response —
   // fire-and-forget, with the error still surfaced to server logs.
@@ -102,6 +114,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     .catch((err) => console.error("Failed to log document view event", err));
 
   if (req.nextUrl.searchParams.get("raw") === "1") {
+    // Raw bytes are only for pdf.js, and always labelled as a PDF.
+    if (!isPdf) {
+      return NextResponse.json({ error: "Preview isn't available for this file." }, { status: 400 });
+    }
     const buffer = await getFileBuffer(key);
     // NextResponse's BodyInit type doesn't accept Node's Buffer/typed-array
     // views under this TS lib's stricter generic ArrayBufferLike checking,
@@ -116,6 +132,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     });
   }
 
-  const url = await getPreviewUrl(key);
+  const url = await getPreviewUrl(key, isPdf ? "pdf" : document.docType);
   return NextResponse.redirect(url);
 }

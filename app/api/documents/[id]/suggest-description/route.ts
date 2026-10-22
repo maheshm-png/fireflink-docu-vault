@@ -22,10 +22,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const role = await documentRoleById(user, params.id);
   if (!can(role, "editOwnUpload")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const document = await prisma.document.findUniqueOrThrow({
+  const document = await prisma.document.findUnique({
     where: { id: params.id },
     include: { currentVersion: true },
   });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Same ownership rule as PATCH /api/documents/:id (this suggestion feeds
   // straight into that edit form) — without it, any contributor could pull

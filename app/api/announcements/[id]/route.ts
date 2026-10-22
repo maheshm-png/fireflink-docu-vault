@@ -38,7 +38,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
   }
 
-  const existing = await prisma.announcement.findUniqueOrThrow({ where: { id: params.id } });
+  const existing = await prisma.announcement.findUnique({ where: { id: params.id } });
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const announcement = await prisma.announcement.update({
     where: { id: params.id },
     data,

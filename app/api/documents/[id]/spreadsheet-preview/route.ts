@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const versionParam = req.nextUrl.searchParams.get("version");
 
   const [document, reviewRequests] = await Promise.all([
-    prisma.document.findUniqueOrThrow({
+    prisma.document.findUnique({
       where: { id: params.id },
       include: { currentVersion: true, versions: true, ...accessInclude },
     }),
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }),
   ]);
 
-  if (document.deletedAt) {
+  if (!document || document.deletedAt) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const approvedVersionIds = everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt);

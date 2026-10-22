@@ -25,10 +25,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: e.message }, { status: e.status ?? 403 });
   }
 
-  const document = await prisma.document.findUniqueOrThrow({
+  const document = await prisma.document.findUnique({
     where: { id: params.id },
     include: { teamAccess: { select: { teamId: true } } },
   });
+  if (!document) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (document.deletedAt) {
     return NextResponse.json({ error: "This document has been deleted. Restore it first." }, { status: 409 });

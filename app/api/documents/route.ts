@@ -94,7 +94,8 @@ export async function POST(req: NextRequest) {
   }
 
   const form = await req.formData();
-  const file = form.get("file") as File | null;
+  const fileField = form.get("file");
+  const file = fileField instanceof File && fileField.size > 0 ? fileField : null;
   // External-link uploads have been removed — every document is a real
   // file now. This blocks it at the API too, not just by removing the
   // "Link External URL" option from the upload form, since this route can
@@ -102,10 +103,14 @@ export async function POST(req: NextRequest) {
   if (form.get("externalUrl")) {
     return NextResponse.json({ error: "Linked (non-file) uploads are no longer supported." }, { status: 400 });
   }
-  const title = form.get("title") as string;
+  const title = typeof form.get("title") === "string" ? (form.get("title") as string).trim() : "";
   const categoryId = form.get("categoryId") as string;
   const ownerId = form.get("ownerId") as string; // who will review/approve
-  const tags = (form.get("tags") as string)?.split(",").map((t) => t.trim()) ?? [];
+  const tags =
+    (form.get("tags") as string | null)
+      ?.split(",")
+      .map((t) => t.trim())
+      .filter(Boolean) ?? [];
   const docTypeRaw = (form.get("docType") as string) ?? "other";
   const metadataRaw = form.get("metadata") as string | null;
   const confirmDuplicate = form.get("confirmDuplicate") === "true";
@@ -286,14 +291,14 @@ export async function POST(req: NextRequest) {
   // file can't be converted, and the preview falls back gracefully then.
   const [extractedText, , pdfBuffer] = await Promise.all([
     extractText(buffer!, file.name),
-    uploadFile(storageKey, buffer!, file.type),
+    uploadFile(storageKey, buffer!),
     isConvertible(file.name) ? convertToPdf(buffer!, file.name) : Promise.resolve(null),
   ]);
 
   let previewPdfPath: string | null = null;
   if (pdfBuffer) {
     previewPdfPath = `${storageKey}.preview.pdf`;
-    await uploadFile(previewPdfPath, pdfBuffer, "application/pdf");
+    await uploadFile(previewPdfPath, pdfBuffer);
   }
 
   const document = await prisma.document.create({

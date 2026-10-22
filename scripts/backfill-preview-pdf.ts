@@ -45,7 +45,7 @@ async function main() {
         continue;
       }
       const previewPdfPath = `${v.filePath}.preview.pdf`;
-      await uploadFile(previewPdfPath, pdf, "application/pdf");
+      await uploadFile(previewPdfPath, pdf);
       await prisma.documentVersion.update({ where: { id: v.id }, data: { previewPdfPath } });
       console.log("done");
     } catch (err: any) {
