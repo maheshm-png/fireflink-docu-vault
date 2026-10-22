@@ -135,6 +135,7 @@ model User {
   categoriesCreated      Category[]
   announcementsPosted    Announcement[]
   shareLinksCreated      ShareLink[]
+  shareLinkOpens         ShareLinkActivity[]
   inlineCommentsAuthored InlineComment[]
   feedbackAuthored       DocumentFeedback[]   @relation("FeedbackAuthor")
   feedbackStatusChanged  DocumentFeedback[]   @relation("FeedbackStatusChangedBy")
@@ -375,7 +376,7 @@ model Document {
   reviewRequests ReviewRequest[]
   stalenessFlags StalenessFlag[]
   events         DocumentEvent[]
-  shareLink      ShareLink?
+  shareLinks     ShareLink[]
   inlineComments InlineComment[]
   feedback       DocumentFeedback[]
 
@@ -644,15 +645,45 @@ model ShareLink {
   id          String           @id @default(uuid())
   token       String           @unique @default(uuid())
   document    Document         @relation(fields: [documentId], references: [id])
-  documentId  String           @unique
+  documentId  String
   accessLevel ShareAccessLevel
   createdBy   User             @relation(fields: [createdById], references: [id])
   createdById String
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   expiresAt   DateTime?
+  activity    ShareLinkActivity[]
 
+  // One link per person per document (since 2026-10-22): each sharer hands
+  // out their own link, so My Work > Shared links shows only their own
+  // customers' opens.
+  @@unique([documentId, createdById])
+  @@index([documentId])
   @@index([token])
+}
+
+// One row per visitor per link per kind ("open" | "download"), recorded on
+// the server only (lib/shareTracking.ts): nothing on the shared page shows
+// or hints at it. A visitor is an anonymous id per browser (middleware.ts),
+// so reloads update lastAt instead of adding rows. Links are "anyone with
+// the link", so this says how many people used it and when, never who. The
+// sharer's own opens and link-preview bots are skipped.
+model ShareLinkActivity {
+  id          String    @id @default(uuid())
+  shareLink   ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+  shareLinkId String
+  visitorId   String
+  // Set when the opener was signed in to the vault (a colleague), so the
+  // sharer sees who; null for customers outside the vault.
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId      String?
+  type        String // "open" | "download"
+  firstAt     DateTime  @default(now())
+  lastAt      DateTime  @default(now())
+  count       Int       @default(1)
+
+  @@unique([shareLinkId, visitorId, type])
+  @@index([shareLinkId])
 }
 
 // A reviewer's comment tied to a specific selected passage of the

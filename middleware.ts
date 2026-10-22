@@ -1,7 +1,33 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
+// Anonymous id for whoever opens a share link (lib/shareTracking.ts), so
+// reloads by the same browser count as one open. Random, holds nothing
+// about the person, never shown on the page.
+const SHARE_VISITOR_COOKIE = "ff_sv";
+
 export async function middleware(req: NextRequest) {
+  // Public share pages: just make sure the visitor id exists, no auth. Also
+  // forwarded as a header, since the page can't see a cookie set on this
+  // same response.
+  if (req.nextUrl.pathname.startsWith("/share/")) {
+    const existing = req.cookies.get(SHARE_VISITOR_COOKIE)?.value;
+    const visitorId = existing ?? crypto.randomUUID();
+    const headers = new Headers(req.headers);
+    headers.set("x-share-visitor", visitorId);
+    const shareRes = NextResponse.next({ request: { headers } });
+    if (!existing) {
+      shareRes.cookies.set(SHARE_VISITOR_COOKIE, visitorId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: req.nextUrl.protocol === "https:",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+    return shareRes;
+  }
+
   const res = NextResponse.next();
 
   const supabase = createServerClient(
@@ -44,5 +70,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/api/:path*"],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/api/:path*", "/share/:path*"],
 };

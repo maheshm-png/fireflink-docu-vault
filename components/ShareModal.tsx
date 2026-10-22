@@ -36,8 +36,22 @@ const ACCESS_OPTIONS: { value: "view" | "view_download"; label: string; Icon: ty
  * current settings (updating them in place, same link) rather than issuing
  * a second link.
  */
-export default function ShareModal({ documentId }: { documentId: string }) {
+export default function ShareModal({
+  documentId,
+  label = "Share",
+  onClose,
+}: {
+  documentId: string;
+  label?: string;
+  // Called when the dialog closes, e.g. so My Work's Shared links list can
+  // refresh after a link was changed or stopped.
+  onClose?: () => void;
+}) {
   const [open, setOpen] = useState(false);
+  const closeModal = () => {
+    setOpen(false);
+    onClose?.();
+  };
   const [loading, setLoading] = useState(false);
   // Separate from `loading` (also used for the Generate/Update/Stop-sharing
   // actions below, where the form itself should stay visible and just show
@@ -131,13 +145,13 @@ export default function ShareModal({ documentId }: { documentId: string }) {
         className="flex items-center gap-1.5 rounded-ff border border-ff-border bg-white px-4 py-2 text-sm text-ff-text transition-colors hover:bg-ff-lavender"
       >
         <Share2 className="h-4 w-4" aria-hidden />
-        Share
+        {label}
       </button>
 
       {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setOpen(false)}
+          onClick={closeModal}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -158,7 +172,7 @@ export default function ShareModal({ documentId }: { documentId: string }) {
               </div>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={closeModal}
                 aria-label="Close"
                 className="shrink-0 rounded p-1 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
               >
@@ -306,7 +320,7 @@ export default function ShareModal({ documentId }: { documentId: string }) {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={closeModal}
                   className="rounded-ff border border-ff-border bg-white px-4 py-2 text-sm text-ff-text transition-colors hover:bg-ff-lavender"
                 >
                   Close

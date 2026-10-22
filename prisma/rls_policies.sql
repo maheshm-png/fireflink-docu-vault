@@ -452,3 +452,7 @@ alter table "UserViewTeam" enable row level security;
 -- Merge requests (lib/merge.ts): managed only by the app over its own
 -- connection. RLS with no policy denies all PostgREST access.
 alter table "MergeRequest" enable row level security;
+
+-- Share link opens/downloads (lib/shareTracking.ts): app-managed only, no
+-- PostgREST access.
+alter table "ShareLinkActivity" enable row level security;

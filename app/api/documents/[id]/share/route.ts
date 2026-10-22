@@ -56,7 +56,8 @@ async function assertCanManageShare(documentId: string) {
   return everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt).has(document.currentVersionId);
 }
 
-// GET /api/documents/:id/share — current share link status, if any.
+// GET /api/documents/:id/share — the signed-in person's own share link for
+// this document, if they made one.
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,7 +68,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const share = await prisma.shareLink.findUnique({ where: { documentId: params.id } });
+  // Each person has their own link per document (ShareLink's unique
+  // documentId + createdById), so this dialog only ever shows yours.
+  const share = await prisma.shareLink.findUnique({
+    where: { documentId_createdById: { documentId: params.id, createdById: user.id } },
+  });
   const doc = await prisma.document.findUniqueOrThrow({ where: { id: params.id }, select: { visibility: true, downloadable: true } });
   // Tells ShareModal whether to offer "View & download" at all.
   const downloadAllowed = downloadsAllowed(doc);
@@ -127,7 +132,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const share = await prisma.shareLink.upsert({
-    where: { documentId: params.id },
+    where: { documentId_createdById: { documentId: params.id, createdById: user.id } },
     create: { documentId: params.id, accessLevel, expiresAt, createdById: user.id },
     update: { accessLevel, expiresAt },
   });
@@ -145,19 +150,33 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 }
 
-// DELETE /api/documents/:id/share — stop sharing entirely.
+// DELETE /api/documents/:id/share — stop your own link. ?linkId= stops one
+// specific link instead (My Work > Shared links): your own, or anyone's on
+// this document for its uploader, owner, or a superadmin.
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
   // is a 404 here, same as one that doesn't exist (lib/access.ts).
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!(await assertCanManageShare(params.id))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // No assertCanManageShare here: stopping a link is always safe, including
+  // one that stopped working (document archived, back in review).
 
   const document = await prisma.document.findUnique({ where: { id: params.id } });
-  await prisma.shareLink.deleteMany({ where: { documentId: params.id } });
+  const linkId = req.nextUrl.searchParams.get("linkId");
+  if (linkId) {
+    const link = await prisma.shareLink.findUnique({ where: { id: linkId }, select: { documentId: true, createdById: true } });
+    if (!link || link.documentId !== params.id) return NextResponse.json({ error: "Link not found." }, { status: 404 });
+    const mayStop =
+      link.createdById === user.id ||
+      user.role === "superadmin" ||
+      document?.uploadedById === user.id ||
+      document?.ownerId === user.id;
+    if (!mayStop) return NextResponse.json({ error: "Only the person who shared this link can stop it." }, { status: 403 });
+    await prisma.shareLink.delete({ where: { id: linkId } });
+  } else {
+    await prisma.shareLink.deleteMany({ where: { documentId: params.id, createdById: user.id } });
+  }
   if (document) {
     await logAudit({ userId: user.id, action: "edit", documentId: document.id, documentTitle: document.title });
   }

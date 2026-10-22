@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
+import { recordShareActivity } from "@/lib/shareTracking";
 import Logo from "@/components/Logo";
 import DocTypeIcon, { DOC_TYPE_LABEL } from "@/components/DocTypeIcon";
 import PptxSlideViewer from "@/components/PptxSlideViewer";
@@ -36,6 +37,9 @@ export default async function SharePage({ params }: { params: { token: string } 
       </div>
     );
   }
+
+  // Silent: the page is the same either way (lib/shareTracking.ts).
+  await recordShareActivity(share, "open");
 
   const { document } = share;
   // A preview-only document (lib/access.ts downloadsAllowed) overrides a

@@ -3,6 +3,7 @@ import { getDownloadUrl } from "@/lib/storage";
 import { computeRoundAttempts } from "@/lib/versionRounds";
 import { prisma } from "@/lib/prisma";
 import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
+import { recordShareActivity } from "@/lib/shareTracking";
 
 // Same filename convention as app/api/documents/[id]/download/route.ts's
 // own buildDownloadFilename — kept as its own small copy rather than a
@@ -51,5 +52,6 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   const ext = version.originalFilename.split(".").pop() ?? "";
 
   const url = await getDownloadUrl(version.filePath, buildDownloadFilename(share.document.title, label, ext));
+  await recordShareActivity(share, "download");
   return NextResponse.redirect(url);
 }
