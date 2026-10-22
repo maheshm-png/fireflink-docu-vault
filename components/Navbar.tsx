@@ -26,18 +26,6 @@ const supabase = createBrowserClient(
 
 type NavItem = { href: string; label: string; icon: typeof Files; title?: string };
 
-// One branch of the profile menu's access tree: an elbow connector from the
-// root's trunk, plus the trunk carried on past this row unless it's the last.
-function TreeBranch({ last, children }: { last?: boolean; children: React.ReactNode }) {
-  return (
-    <li className="relative flex items-center gap-2 py-1 pl-7">
-      <span aria-hidden className="absolute left-3 top-0 h-1/2 w-3 rounded-bl border-b border-l border-ff-border" />
-      {!last && <span aria-hidden className="absolute bottom-0 left-3 top-1/2 border-l border-ff-border" />}
-      {children}
-    </li>
-  );
-}
-
 function RolePill({ label, strong }: { label: string; strong?: boolean }) {
   return (
     <span
@@ -189,7 +177,7 @@ export default function Navbar({
   // manager/superadmin recovery page) sits in Controls.
   const helpItems: NavItem[] = [
     { href: "/dashboard/assistant", label: "Ask Docu AI", icon: Sparkles },
-    { href: "/dashboard/help", label: "What can I do?", icon: BookOpenText },
+    { href: "/dashboard/help", label: "My permissions", icon: BookOpenText },
     { href: "/dashboard/release-notes", label: "Release notes", icon: Newspaper },
     // Contributors look categories up (what each one's upload form asks
     // for); managers and superadmins edit them, so theirs sits in Controls
@@ -312,74 +300,74 @@ export default function Navbar({
                 onClick={(e) => e.stopPropagation()}
                 className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1.5rem)] animate-fade-in rounded-ff border border-ff-border bg-white p-4 text-ff-text shadow-ff-lg"
               >
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ff-lavender text-sm font-semibold uppercase text-ff-accent">
+                {/* Who you are and your org role, then your teams with your
+                    role in each, then who you report to. userTeam is
+                    "BD (Manager), Sales (Contributor)". What each role
+                    covers is behind the (i)s. */}
+                <div className="-mx-4 -mt-4 mb-3 flex items-center gap-3 rounded-t-ff bg-ff-lavender/40 px-4 py-3.5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ff-accent-gradient text-sm font-semibold uppercase text-white">
                     {userName.charAt(0)}
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-ff-text">{userName}</div>
                     <div className="truncate text-xs text-ff-textMuted">{userEmail}</div>
                   </div>
                 </div>
-                {/* Access tree: the org (org role) at the root, one branch per
-                    team (team role), then who they report to. userTeam is
-                    "BD (Manager), Sales (Contributor)". */}
-                <div className="border-t border-ff-border pt-3 text-sm">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ff-textMuted">Your access</div>
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ff-accent text-white">
-                      <Building2 className="h-3.5 w-3.5" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-ff-text">FireFlink</span>
-                      <span className="flex items-center gap-1 text-xs text-ff-textMuted">
-                        Org role
-                        <InfoTooltip text={`${ORG_LEVEL.covers}. ${ROLE_DESCRIPTIONS[role]}`} align="right" />
-                      </span>
-                    </span>
-                    <RolePill label={ROLE_LABELS[role]} strong />
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <div className="mb-1 flex items-center gap-1 text-xs font-medium text-ff-textMuted">
+                      Org role
+                      <InfoTooltip text={`${ORG_LEVEL.covers}. ${ROLE_DESCRIPTIONS[role]}`} align="right" />
+                    </div>
+                    <div className="flex items-center gap-2 rounded-ff border border-ff-border px-2.5 py-1.5">
+                      <Building2 className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-medium text-ff-text">FireFlink</span>
+                      <RolePill label={ROLE_LABELS[role]} strong />
+                    </div>
                   </div>
-                  <ul>
+                  <div>
+                    <div className="mb-1 flex items-center gap-1 text-xs font-medium text-ff-textMuted">
+                      Team role
+                      <InfoTooltip text={`${TEAM_LEVEL.covers}.`} align="right" />
+                    </div>
                     {(() => {
                       const teams = (userTeam ? userTeam.split(", ") : []).map((entry) => {
                         const m = entry.match(/^(.*) \((.*)\)$/);
                         return m ? { name: m[1], role: m[2] } : { name: entry, role: "" };
                       });
                       if (teams.length === 0) {
-                        return (
-                          <TreeBranch last>
-                            <span className="text-xs italic text-ff-textMuted">Not in any team</span>
-                          </TreeBranch>
-                        );
+                        return <p className="px-2.5 text-xs italic text-ff-textMuted">Not in any team</p>;
                       }
-                      return teams.map((t, i) => (
-                        <TreeBranch key={t.name} last={i === teams.length - 1}>
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ff-lavender text-ff-accent">
-                            <Users className="h-3 w-3" aria-hidden />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium text-ff-text">{t.name}</span>
-                            <span className="flex items-center gap-1 text-xs text-ff-textMuted">
-                              Team role
-                              {i === 0 && <InfoTooltip text={`${TEAM_LEVEL.covers}.`} align="right" />}
-                            </span>
-                          </span>
-                          {t.role && <RolePill label={t.role} />}
-                        </TreeBranch>
-                      ));
+                      return (
+                        <ul className="divide-y divide-ff-border rounded-ff border border-ff-border">
+                          {teams.map((t) => (
+                            <li key={t.name} className="flex items-center gap-2 px-2.5 py-1.5">
+                              <Users className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate font-medium text-ff-text">{t.name}</span>
+                              {t.role && <RolePill label={t.role} />}
+                            </li>
+                          ))}
+                        </ul>
+                      );
                     })()}
-                  </ul>
-                  <div className="mt-3 flex items-center gap-2 rounded-ff bg-ff-lavender/40 px-2 py-1.5">
-                    <UserRound className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
-                    <span className="text-xs text-ff-textMuted">Reports to</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-0.5 text-xs">
+                    <UserRound className="h-3.5 w-3.5 shrink-0 text-ff-textMuted" aria-hidden />
+                    <span className="text-ff-textMuted">Reports to</span>
                     <span className="ml-auto min-w-0 truncate text-sm font-medium text-ff-text">{userReportsTo ?? "No one"}</span>
                   </div>
-                  <Link href="/dashboard/help" className="mt-2 block text-xs text-ff-accent hover:underline">
-                    What can I do?
-                  </Link>
                 </div>
 
-                <div className="mt-3 border-t border-ff-border pt-3">
+                <div className="mt-3 border-t border-ff-border pt-2">
+                  <Link
+                    href="/dashboard/help"
+                    className="flex w-full items-center gap-2 rounded-ff px-1.5 py-1.5 text-sm text-ff-text transition-colors hover:bg-ff-lavender/60"
+                  >
+                    <BookOpenText className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
+                    My permissions
+                  </Link>
+                </div>
+                <div>
                   {!changingPassword ? (
                     <button
                       onClick={() => setChangingPassword(true)}
@@ -446,6 +434,16 @@ export default function Navbar({
                       </p>
                     </form>
                   )}
+                </div>
+                <div className="mt-2 border-t border-ff-border pt-2">
+                  <button
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className="flex w-full items-center gap-2 rounded-ff px-1.5 py-1.5 text-left text-sm text-ff-danger transition-colors hover:bg-ff-danger/10 disabled:opacity-50"
+                  >
+                    <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+                    {loggingOut ? "Logging out..." : "Log out"}
+                  </button>
                 </div>
               </div>
             </>

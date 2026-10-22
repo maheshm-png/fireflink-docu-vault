@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lock, Folder } from "lucide-react";
+import { Lock, Folder, Users, Eye } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { seesAllRestricted, visibleTeamIds, uploadableTeamIds, canManageFolders, managesTeam, contributesToTeam, type AccessUser } from "@/lib/access";
 import DocumentTable, { type DocRow } from "@/components/DocumentTable";
@@ -185,7 +185,7 @@ export default async function TeamSpaceView({
     ? managesTeam(user, activeTeam.id)
       ? `In ${activeTeam.name} you're a Manager: you approve its uploads, can publish without review, and organise its folders.`
       : contributesToTeam(user, activeTeam.id)
-        ? `In ${activeTeam.name} you're a Contributor: you can upload for this team. A team Manager approves it.`
+        ? `In ${activeTeam.name} you're a Contributor: you can upload for this team and move its documents into folders. A team Manager approves uploads.`
         : user.teamIds.includes(activeTeam.id)
           ? `In ${activeTeam.name} you're a Member: you can view and download this team's documents.`
           : `You're not in ${activeTeam.name}. You see its documents through your leadership view: view, download and comment only.`
@@ -195,7 +195,7 @@ export default async function TeamSpaceView({
     defaultTeam && user.teamIds.includes(defaultTeam.id)
       ? `${defaultTeam.name} is your default team (the first team you were added to), so My teams opens it first.`
       : null;
-  // Both sit behind the (i) next to the first row's label, not on the page.
+  // Both sit behind the (i) on the open team's line, not on the page.
   const teamInfo = [yourPart, defaultNote && myTeamTabs.length > 1 ? defaultNote : null].filter(Boolean).join(" ");
 
   if (teams.length === 0) {
@@ -218,12 +218,22 @@ export default async function TeamSpaceView({
       active ? "border-ff-accent font-medium text-ff-accent" : "border-transparent text-ff-textMuted hover:text-ff-text"
     }`;
 
+  // Segment inside the team switcher's pill track.
   const chip = (active: boolean) =>
-    `flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-      active
-        ? "border-ff-accent bg-ff-accent/10 font-medium text-ff-accent"
-        : "border-ff-border bg-white text-ff-textMuted hover:border-ff-accent/40 hover:text-ff-text"
+    `flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm transition-all ${
+      active ? "bg-ff-plum-gradient font-semibold text-white shadow-ff-md" : "text-ff-text hover:bg-ff-lavender/60"
     }`;
+  const avatar = (name: string, size: "sm" | "md", active = true) => (
+    <span
+      aria-hidden
+      className={`flex shrink-0 items-center justify-center rounded-full font-bold ${
+        size === "md" ? "h-8 w-8 text-sm" : "h-6 w-6 text-xs"
+      } ${active ? "bg-ff-plum-gradient text-white ring-2 ring-white/30" : "bg-ff-lavenderDeep text-ff-accent"}`}
+    >
+      {name.trim().charAt(0).toUpperCase()}
+    </span>
+  );
+  const activeTab = tabs.find((t) => t.id === activeTeam?.id);
 
   return (
     <NewDocumentsProvider
@@ -231,43 +241,66 @@ export default async function TeamSpaceView({
       initialRecentDocs={newDocs?.recentDocs ?? []}
       scopeQuery={activeTeam ? `scope=team&team=${activeTeam.id}` : "scope=everyone"}
     >
-      {/* Your teams, your role in each and which one is your default. What
-          you can do in the open team is behind the (i). */}
-      <div className="mb-3 rounded-ff border border-ff-border bg-white shadow-ff">
-        <div className="space-y-2.5 p-3">
-          {[
-            { label: myTeamTabs.length > 1 ? "Your teams" : "Your team", rows: myTeamTabs, showRole: true },
-            { label: "Leadership view", rows: tabs.filter((t) => !t.mine), showRole: false },
+      {/* Team line, one slim row. One team (most people): a badge with the
+          team's initial, its name and your role. Several: a pill track to
+          switch (your own teams first, then teams seen through the
+          leadership view), then your role in the open one. What that role
+          lets you do is behind the (i). */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        {tabs.length > 1 ? (
+          [
+            { label: "Your teams", icon: Users, rows: myTeamTabs },
+            { label: "Leadership view", icon: Eye, rows: tabs.filter((t) => !t.mine) },
           ]
             .filter((group) => group.rows.length > 0)
             .map((group, i) => (
-              <div key={group.label} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-                <span className="flex w-36 shrink-0 items-center gap-1 text-xs font-semibold uppercase tracking-wide text-ff-textMuted">
-                  {group.label}
-                  {i === 0 && teamInfo && <InfoTooltip text={teamInfo} />}
-                </span>
-                <div className="flex flex-wrap gap-2">
+              <div key={group.label} className="flex flex-wrap items-center gap-2">
+                {i > 0 && (
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-ff-textMuted">
+                    <group.icon className="h-3.5 w-3.5" aria-hidden />
+                    {group.label}
+                  </span>
+                )}
+                <nav
+                  aria-label={group.label}
+                  className="flex flex-wrap items-center gap-1 rounded-full border border-ff-border bg-ff-surface-gradient p-1 shadow-ff"
+                >
                   {group.rows.map((t) => {
                     const active = (activeTeam?.id ?? null) === t.id;
                     return (
                       <Link key={t.id ?? "all"} href={href(t.id)} aria-current={active ? "page" : undefined} className={chip(active)}>
-                        <span>{t.name}</span>
-                        {group.showRole && (
-                          <span className="rounded-full bg-ff-accent/10 px-1.5 text-xs text-ff-accent">{t.role}</span>
-                        )}
-                        {t.isDefault && group.showRole && (
-                          <span className="rounded-full bg-ff-success/10 px-1.5 text-xs font-medium text-ff-success">Default</span>
-                        )}
-                        <span className="rounded-full bg-ff-lavender px-1.5 text-xs text-ff-textMuted" title="Documents">
+                        {avatar(t.name, "sm", active)}
+                        {t.name}
+                        <span className={`text-xs font-medium ${active ? "text-white/75" : "text-ff-textMuted"}`} title="Documents">
                           {t.count}
                         </span>
                       </Link>
                     );
                   })}
-                </div>
+                </nav>
               </div>
-            ))}
-        </div>
+            ))
+        ) : (
+          activeTeam && (
+            <div className="flex items-center gap-2.5 rounded-full border border-ff-border bg-ff-surface-gradient py-1 pl-1 pr-4 shadow-ff">
+              {avatar(activeTeam.name, "md")}
+              <span className="text-sm font-semibold text-ff-text">{activeTeam.name}</span>
+            </div>
+          )
+        )}
+        {activeTeam && activeTab && (
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-ff-accent/20 bg-ff-lavender px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-ff-accent">
+              {activeTab.mine ? activeTab.role : "Leadership view"}
+            </span>
+            {activeTab.isDefault && activeTab.mine && myTeamTabs.length > 1 && (
+              <span className="rounded-full border border-ff-success/20 bg-ff-success/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-ff-success">
+                Default
+              </span>
+            )}
+            {teamInfo && <InfoTooltip text={teamInfo} />}
+          </div>
+        )}
       </div>
 
       {activeTeam && <NewInTeam teamName={activeTeam.name} />}

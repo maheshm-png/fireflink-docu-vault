@@ -26,7 +26,7 @@ export default function TeamSearchBox({ initialQuery, placeholder }: { initialQu
         e.preventDefault();
         go(value);
       }}
-      className="flex min-w-[16rem] flex-1 items-center gap-2 rounded-ff border border-ff-border bg-white px-3 py-2 focus-within:border-ff-accent"
+      className="flex h-9 min-w-[16rem] flex-1 items-center gap-2 rounded-full border border-ff-border bg-white px-3.5 focus-within:border-ff-accent"
       role="search"
     >
       <Search className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />

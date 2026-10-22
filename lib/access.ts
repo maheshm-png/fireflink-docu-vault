@@ -115,11 +115,16 @@ export function decidesEveryoneRequests(user: AccessUser): boolean {
   return user.isGlobalApprover && user.role === "manager";
 }
 
-/** May this user create, rename and delete folders in a team's documents,
- * and move the team's documents between them? The team's managers and
- * superadmins. */
+/** May this user create, rename and delete folders in a team's documents?
+ * The team's managers and superadmins. */
 export function canManageFolders(user: AccessUser, teamId: string): boolean {
   return user.role === "superadmin" || managesTeam(user, teamId);
+}
+
+/** May this user move a team's documents between its folders? The team's
+ * contributors and managers, and superadmins. */
+export function canFileIntoFolders(user: AccessUser, teamId: string): boolean {
+  return user.role === "superadmin" || contributesToTeam(user, teamId);
 }
 
 /** May this user browse a team's folders? Its members, superadmins and

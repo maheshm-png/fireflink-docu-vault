@@ -11,10 +11,14 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState("");
 
   async function toggle() {
     setBusy(true);
-    const res = await fetch(`/api/documents/${documentId}/${archived ? "unarchive" : "archive"}`, { method: "POST" });
+    const res = await fetch(`/api/documents/${documentId}/${archived ? "unarchive" : "archive"}`, {
+      method: "POST",
+      ...(archived ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) }),
+    });
     setBusy(false);
     setConfirming(false);
     if (!res.ok) {
@@ -28,7 +32,10 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
   return (
     <>
       <button
-        onClick={() => setConfirming(true)}
+        onClick={() => {
+          setNote("");
+          setConfirming(true);
+        }}
         title={archived ? "Restore" : "Archive"}
         aria-label={archived ? "Restore" : "Archive"}
         className="rounded-ff border border-ff-border p-2 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-text"
@@ -42,14 +49,31 @@ export default function ArchiveButton({ documentId, archived }: { documentId: st
         message={
           archived
             ? "It stays hidden until it's re-approved."
-            : "It'll be hidden from everyone. If it's published, everyone who could see it is told to stop using it. You can restore it later."
+            : "Everyone who could see it can still view it, but no one can download or share it. If it's published, they're told to stop using any copy. You can restore it later."
         }
         confirmLabel={archived ? "Yes, restore" : "Yes, archive"}
         danger={!archived}
         busy={busy}
         onConfirm={toggle}
         onCancel={() => setConfirming(false)}
-      />
+      >
+        {!archived && (
+          <div>
+            <label htmlFor="archive-note" className="mb-1 block text-xs font-medium text-ff-textMuted">
+              Note (optional)
+            </label>
+            <textarea
+              id="archive-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={1000}
+              rows={3}
+              placeholder="Why it's archived, e.g. replaced by the 2027 pricing deck"
+              className="w-full rounded-ff border border-ff-border px-2.5 py-1.5 text-sm text-ff-text focus:border-ff-accent focus:outline-none"
+            />
+          </div>
+        )}
+      </ConfirmModal>
       <AlertModal message={error} onClose={() => setError(null)} title={archived ? "Couldn't restore" : "Couldn't archive"} />
     </>
   );

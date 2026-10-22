@@ -7,8 +7,8 @@ import BrandedLoader from "@/components/BrandedLoader";
 import AlertModal from "@/components/AlertModal";
 import InfoTooltip from "@/components/InfoTooltip";
 
-// Manage-tab control for team managers: which of the team's folders this
-// document sits in (Home > My teams). One row per team the viewer manages,
+// Manage-tab control for team contributors and managers: which of the team's folders this
+// document sits in (Home > My teams). One row per team the viewer may file into,
 // since a document shared with several teams is filed by each separately.
 // API: app/api/documents/[id]/folder.
 export default function DocumentFolderSettings({
@@ -69,7 +69,7 @@ export default function DocumentFolderSettings({
                 </select>
                 {busyTeam === t.teamId && <BrandedLoader size={12} />}
                 {t.folders.length === 0 && (
-                  <span className="text-xs text-ff-textMuted">No folders yet: create them on Home &gt; My teams.</span>
+                  <span className="text-xs text-ff-textMuted">No folders yet. A team Manager can create them on Home &gt; My teams.</span>
                 )}
               </label>
             ))}

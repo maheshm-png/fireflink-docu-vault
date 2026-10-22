@@ -225,18 +225,21 @@ export async function notifyDocumentRevoked(params: {
   // reviewRequests loaded to compute it, so this stays a plain string here.
   versionLabel?: string;
   recipients: { id: string; name: string }[];
+  // The archiving manager's optional note (why it was withdrawn).
+  note?: string;
 }) {
   const versionSuffix = params.versionLabel ? ` (${params.versionLabel})` : "";
+  const noteLine = params.note ? ` Note: ${params.note}` : "";
   await postToTeamSpace(
     params.documentId,
-    `Document withdrawn: "${params.documentTitle}${versionSuffix}". Please do not use this document, if you have already downloaded a copy, discontinue its use immediately.`
+    `Document withdrawn: "${params.documentTitle}${versionSuffix}". Please do not use this document, if you have already downloaded a copy, discontinue its use immediately.${noteLine}`
   );
   await createNotifications(
     params.recipients.map((r) => ({
       userId: r.id,
       type: "revoked" as const,
       title: `Document withdrawn: ${params.documentTitle}${versionSuffix}`,
-      body: "Please don't use this document, discontinue use of any copy you've already downloaded.",
+      body: `Please don't use this document, discontinue use of any copy you've already downloaded.${noteLine}`,
       documentId: params.documentId,
       documentTitle: params.documentTitle,
     }))
@@ -630,6 +633,74 @@ export async function notifyEveryoneDecided(params: {
       }</p>
       ${params.comment ? `<p>Comment: ${escapeHtml(params.comment)}</p>` : ""}
       <p><a href="${APP_URL}/dashboard/documents/${params.documentId}">Open Document</a></p>
+    `,
+  });
+}
+
+// Someone asked to merge a document into one this manager manages
+// (lib/merge.ts): in-app and by email.
+export async function notifyMergeRequested(params: {
+  sourceTitle: string;
+  targetTitle: string;
+  targetId: string;
+  requestedByName: string;
+  approver: { id: string; name: string; email: string };
+}) {
+  await createNotifications([
+    {
+      userId: params.approver.id,
+      type: "merge_requested",
+      title: `Merge request: ${params.targetTitle}`,
+      body: `${params.requestedByName} asks to merge "${params.sourceTitle}" into it.`,
+      documentId: params.targetId,
+      documentTitle: params.targetTitle,
+    },
+  ]);
+  await sendEmail({
+    to: params.approver.email,
+    subject: `Merge Request: ${params.targetTitle}`,
+    html: `
+      <p>Dear ${params.approver.name},</p>
+      <p>${params.requestedByName} asks to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>". If you approve, "${escapeHtml(params.sourceTitle)}" is removed and "${escapeHtml(params.targetTitle)}" is kept.</p>
+      <p>You can approve or decline it from My Work or the document's page.</p>
+      <p><a href="${APP_URL}/dashboard/documents/${params.targetId}">Open Document</a></p>
+    `,
+  });
+}
+
+// The target's manager decided a merge request: the person who asked hears
+// the outcome, in-app and by email.
+export async function notifyMergeDecided(params: {
+  approved: boolean;
+  sourceTitle: string;
+  sourceId: string;
+  targetTitle: string;
+  targetId: string;
+  decidedByName: string;
+  requester: { id: string; name: string; email: string };
+}) {
+  // Approved: the source is gone, so point at the document that was kept.
+  const documentId = params.approved ? params.targetId : params.sourceId;
+  const documentTitle = params.approved ? params.targetTitle : params.sourceTitle;
+  await createNotifications([
+    {
+      userId: params.requester.id,
+      type: params.approved ? "merge_approved" : "merge_declined",
+      title: params.approved ? `Merged: ${params.sourceTitle}` : `Merge declined: ${params.sourceTitle}`,
+      body: params.approved
+        ? `${params.decidedByName} merged it into "${params.targetTitle}".`
+        : `${params.decidedByName} declined merging it into "${params.targetTitle}".`,
+      documentId,
+      documentTitle,
+    },
+  ]);
+  await sendEmail({
+    to: params.requester.email,
+    subject: `Merge ${params.approved ? "Approved" : "Declined"}: ${params.sourceTitle}`,
+    html: `
+      <p>Dear ${params.requester.name},</p>
+      <p>${params.decidedByName} ${params.approved ? "approved" : "declined"} your request to merge "<strong>${escapeHtml(params.sourceTitle)}</strong>" into "<strong>${escapeHtml(params.targetTitle)}</strong>".</p>
+      <p><a href="${APP_URL}/dashboard/documents/${documentId}">Open Document</a></p>
     `,
   });
 }

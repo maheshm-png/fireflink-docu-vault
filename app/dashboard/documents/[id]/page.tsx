@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronLeft, Ban, EyeOff } from "lucide-react";
+import { Info, MessagesSquare, MessageCircle, History, Settings, Clock, ChevronLeft, Ban, EyeOff, UserRound, ShieldCheck, Tag } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase";
 import { can, type Role } from "@/lib/rbac";
 import Navbar from "@/components/Navbar";
@@ -18,12 +18,13 @@ import {
   involvedInReview,
   isSeesAllOutsider,
   canBypassReviewFor,
-  canManageFolders,
+  canFileIntoFolders,
   sharingAllowed,
   decidesEveryoneRequests,
   managesDocumentTeam,
   teamAllows,
   uploadableTeamIds,
+  visibleDocumentIds,
 } from "@/lib/access";
 import EveryoneRequestPanel from "@/components/EveryoneRequestPanel";
 import AccessBadges from "@/components/AccessBadges";
@@ -40,6 +41,9 @@ import DeleteButton from "./DeleteButton";
 import ArchiveButton from "./ArchiveButton";
 import RestoreButton from "@/app/admin/deleted/RestoreButton";
 import LifecycleActions from "./LifecycleActions";
+import MergeDocument from "@/components/MergeDocument";
+import MergeRequestPanel from "@/components/MergeRequestPanel";
+import { canStartMerge } from "@/lib/merge";
 import FeedbackManagement from "./FeedbackManagement";
 import ReviewVersionReference from "./ReviewVersionReference";
 import SetCurrentVersionButton from "./SetCurrentVersionButton";
@@ -81,6 +85,7 @@ export default async function DocumentDetailPage({
         uploadedBy: true,
         deletedBy: true,
         revokedBy: true,
+        archivedBy: { select: { name: true } },
         currentVersion: true,
         versions: { orderBy: { versionNumber: "desc" }, include: { uploadedBy: true } },
         stalenessFlags: { where: { resolved: false } },
@@ -396,6 +401,9 @@ export default async function DocumentDetailPage({
   // version stays live/searchable throughout, same as everywhere else this
   // session's work treats that state.
   const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+  // Archived after being published: anyone who could see it may still open
+  // and preview it, but nobody can download it (see /download).
+  const archivedViewable = hasEverPublished && document.status === "archived";
 
   // While a document isn't publicly visible yet (still pending_review, or
   // rejected/revoked with nothing ever approved), only people with an
@@ -414,7 +422,7 @@ export default async function DocumentDetailPage({
     document.ownerId === user.id ||
     wasEverReviewer ||
     user.role === "superadmin";
-  if (!isPubliclyVisible && !canSeeUnpublishedDoc) {
+  if (!isPubliclyVisible && !archivedViewable && !canSeeUnpublishedDoc) {
     redirect("/dashboard");
   }
 
@@ -474,8 +482,8 @@ export default async function DocumentDetailPage({
   // viewer may tick (theirs, or all for a superadmin) plus any
   // already on the document, shown locked when they aren't in it.
   const canEditAccess = !isDeleted && canChangeAccess(user, stakeDoc, "restricted");
-  // Downloads turned off: preview only, for everyone.
-  const previewOnly = !downloadsAllowed(document);
+  // Downloads turned off, or archived: preview only, for everyone.
+  const previewOnly = !downloadsAllowed(document) || document.status === "archived";
   const canEditDownloads = !isDeleted && canChangeDownloads(user, stakeDoc) && Boolean(document.currentVersionId);
   const canOpenToOrg = canChangeAccess(user, stakeDoc, "org");
   // Superadmins and the document's team managers (extending it to other
@@ -598,10 +606,10 @@ export default async function DocumentDetailPage({
   // someone who can legitimately triage feedback could end up with no
   // Manage tab to reach FeedbackManagement from at all.
   // Folder per team (Home > My teams), for the teams whose folders this
-  // viewer manages (lib/access.ts canManageFolders).
+  // viewer may file into (lib/access.ts canFileIntoFolders).
   const folderTeams =
     !isDeleted && document.visibility === "restricted"
-      ? document.teamAccess.filter((a) => canManageFolders(user, a.teamId))
+      ? document.teamAccess.filter((a) => canFileIntoFolders(user, a.teamId))
       : [];
   const folderOptions = folderTeams.length
     ? await prisma.teamFolder.findMany({
@@ -617,7 +625,28 @@ export default async function DocumentDetailPage({
     folders: folderOptions.filter((f) => f.teamId === a.teamId).map(({ id, name }) => ({ id, name })),
   }));
 
+  // Merge (lib/merge.ts): this document into another, and requests from
+  // others to merge into this one that wait on this viewer.
+  const canMerge = !isDeleted && canStartMerge(user, docRole, document);
+  const [pendingMergeOut, incomingMerges] = await Promise.all([
+    canMerge
+      ? prisma.mergeRequest.findFirst({
+          where: { sourceId: document.id, status: "pending" },
+          include: { target: { select: { title: true } }, approver: { select: { name: true } } },
+        })
+      : Promise.resolve(null),
+    isDeleted
+      ? Promise.resolve([])
+      : prisma.mergeRequest.findMany({
+          where: { targetId: document.id, approverId: user.id, status: "pending", source: { deletedAt: null } },
+          include: { source: { select: { title: true } }, requestedBy: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        }),
+  ]);
+  const visibleMergeSources = await visibleDocumentIds(user, incomingMerges.map((m) => m.sourceId));
+
   const hasManageTab =
+    canMerge ||
     folderControls.length > 0 ||
     canManageLifecycle ||
     canEdit ||
@@ -652,6 +681,7 @@ export default async function DocumentDetailPage({
   if (canDelete) youCan.push("delete it");
   const youCannot: string[] = [];
   if (live && previewOnly) youCannot.push("download it (preview only)");
+  if (!isDeleted && archivedViewable) youCannot.push("download or share it (archived)");
   if (live && teamDoc) youCannot.push("share it outside the company (team document)");
   else if (live && !document.shareEnabled) youCannot.push("share it (sharing is turned off)");
   if (!canEdit && !isDeleted && document.uploadedById !== user.id) {
@@ -833,7 +863,7 @@ export default async function DocumentDetailPage({
             <h2 className="mb-3 text-base font-bold text-ff-text">Version History</h2>
             <div className="overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff">
               <table className="w-full text-left text-sm">
-                <thead className="border-b-2 border-ff-accent/20 bg-ff-lavender text-xs font-semibold uppercase tracking-wide text-ff-textMuted">
+                <thead className="border-b border-ff-border bg-[#F4E9F2] text-xs font-semibold uppercase tracking-wide text-[#5B1F51]">
                   <tr>
                     <th className="px-4 py-2 font-medium">Round</th>
                     <th className="px-4 py-2 font-medium">Version</th>
@@ -1016,6 +1046,23 @@ export default async function DocumentDetailPage({
               />
             )}
 
+            {canMerge && (
+              <MergeDocument
+                documentId={document.id}
+                documentTitle={document.title}
+                suggestedTitle={document.duplicateOf && !document.duplicateOf.deletedAt ? document.duplicateOf.title : null}
+                pending={
+                  pendingMergeOut
+                    ? {
+                        targetTitle: pendingMergeOut.target.title,
+                        approverName: pendingMergeOut.approver.name,
+                        mine: pendingMergeOut.requestedById === user.id,
+                      }
+                    : null
+                }
+              />
+            )}
+
             {canEdit && (
               <EditDocumentForm
                 documentId={document.id}
@@ -1153,112 +1200,184 @@ export default async function DocumentDetailPage({
           <ChevronLeft className="h-3.5 w-3.5" aria-hidden /> Documents
         </Link>
 
-        {/* Title row: just the identity, plus at most one badge — the one
-            thing that actually needs attention right now. Everything else
-            (category, permanent/review-due, the review-history lookup) is
-            demoted to the quieter metadata line below, instead of competing
-            with the title for the same visual weight. */}
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <DocTypeIcon docType={document.docType} className="h-5 w-5 shrink-0 text-ff-textMuted" />
-          <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight text-ff-text">{document.title}</h1>
-          {/* What this viewer can and can't do here, one tap away. */}
-          <InfoTooltip
-            text={`You can ${youCan.join(", ")}.${youCannot.length ? ` You can't ${youCannot.join("; ")}.` : ""}`}
-          />
-          {/* A new version is awaiting a decision on a document that's
-              already been published before — worded differently depending
-              on who's looking: a manager/reviewer still has a decision to
-              make, while the document's own uploader is just waiting on
-              one. Jumps straight into the Review tab's status section. */}
-          {hasEverPublished &&
-            document.status === "pending_review" &&
-            (docRole === "manager" || docRole === "superadmin" || document.uploadedById === user.id) && (
-              <Badge
-                variant="warning"
-                solid
-                pulse
-                icon={<Clock className="h-3 w-3" aria-hidden />}
-                tooltip="Go to the review section"
-                href={`/dashboard/documents/${document.id}#review-status`}
-              >
-                {docRole === "manager" || docRole === "superadmin" ? "Waiting for review" : "Under review"}
-              </Badge>
-            )}
-        </div>
+        {/* Header card. Top: what the document is, who uploaded and
+            reviewed it, and the main actions (preview, share, download) on
+            the right. Bottom strip: its labels (category, access, review
+            due) and, for managers, the manage actions. */}
+        <div className="mb-6 rounded-ff border border-ff-border bg-white shadow-ff">
+          <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-ff bg-ff-lavender text-ff-accent">
+                <DocTypeIcon docType={document.docType} className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="min-w-0 break-words text-xl font-bold tracking-tight text-ff-text sm:text-2xl">{document.title}</h1>
+                  {/* What this viewer can and can't do here, one tap away. */}
+                  <InfoTooltip
+                    text={`You can ${youCan.join(", ")}.${youCannot.length ? ` You can't ${youCannot.join("; ")}.` : ""}`}
+                  />
+                  {hasEverPublished &&
+                    document.status === "pending_review" &&
+                    (docRole === "manager" || docRole === "superadmin" || document.uploadedById === user.id) && (
+                      <Badge
+                        variant="warning"
+                        solid
+                        pulse
+                        icon={<Clock className="h-3 w-3" aria-hidden />}
+                        tooltip="Go to the review section"
+                        href={`/dashboard/documents/${document.id}#review-status`}
+                      >
+                        {docRole === "manager" || docRole === "superadmin" ? "Waiting for review" : "Under review"}
+                      </Badge>
+                    )}
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ff-textMuted">
+                  <span className="inline-flex items-center gap-1.5">
+                    <UserRound className="h-3.5 w-3.5" aria-hidden />
+                    Uploaded by <span className="font-medium text-ff-text">{document.uploadedBy.name}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+                    {document.reviewBypassed ? (
+                      "Published without review"
+                    ) : (
+                      <>
+                        Reviewer <span className="font-medium text-ff-text">{document.owner.name}</span>
+                      </>
+                    )}
+                  </span>
+                  {canManageLifecycle && !isDeleted && document.status === "published" && effectiveCurrentVersion && (
+                    <CurrentVersionControl
+                      documentId={document.id}
+                      currentVersionNumber={effectiveCurrentVersion.versionNumber}
+                      currentVersionLabel={versionLabel(effectiveCurrentVersion.id, effectiveCurrentVersion.versionNumber)}
+                      versions={document.versions
+                        .filter((v) => approvedVersionIds.has(v.id))
+                        .map((v) => ({ id: v.id, versionNumber: v.versionNumber, label: versionLabel(v.id, v.versionNumber) }))}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {!isDeleted && document.externalUrl && (
+                <>
+                  <DocumentPreview documentId={document.id} docType={document.docType} externalUrl={document.externalUrl} />
+                  {/* isPubliclyVisible, not the raw document.status === "published"
+                      check this used to have: a link document simply back in
+                      re-review after already being published once must stay
+                      shareable, same as the file-based branch below (which
+                      gates on effectiveCurrentVersion, itself isPubliclyVisible-
+                      aware) already does. */}
+                  {isPubliclyVisible && (document.shareEnabled && sharingAllowed(document) ? (
+                    <ShareModal documentId={document.id} />
+                  ) : (
+                    <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
+                  ))}
+                  <a
+                    href={document.externalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105"
+                  >
+                    Open Link
+                  </a>
+                </>
+              )}
+              {!isDeleted && effectiveCurrentVersion && (
+                <>
+                  <DocumentPreview
+                    documentId={document.id}
+                    docType={document.docType}
+                    extractedText={effectiveCurrentVersion.extractedText}
+                    hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
+                    previewOnly={previewOnly}
+                  />
+                  {document.status === "archived" ? null : document.shareEnabled && sharingAllowed(document) ? (
+                    <ShareModal documentId={document.id} />
+                  ) : (
+                    <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
+                  )}
+                  {/* No `versions`/currentVersionNumber here anymore — only
+                      the current live version is ever downloadable, by
+                      anyone, regardless of role. Older versions (including
+                      the newest upload while it's still pending review) are
+                      view-only now: reviewers/contributors look at them via
+                      Preview while reviewing, not Download — see the matching
+                      restriction in app/api/documents/[id]/download/route.ts. */}
+                  {previewOnly ? (
+                    <span
+                      title={document.status === "archived" ? "Archived documents can't be downloaded" : "Downloads are turned off for this document"}
+                      className="flex items-center gap-1.5 rounded-ff border border-ff-border bg-ff-lavender/40 px-4 py-2 text-sm text-ff-textMuted"
+                    >
+                      <EyeOff className="h-4 w-4" aria-hidden />
+                      Preview only
+                    </span>
+                  ) : (
+                    <DownloadMenu
+                      documentId={document.id}
+                      hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
+                      docType={document.docType}
+                      variant="cta"
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
-        {/* Metadata line: who uploaded it and who's reviewing it, plus every static fact —
-            category, permanent-flag or review-due, purge countdown — and,
-            for a non-stakeholder, the public-safe Review History lookup.
-            Same muted weight throughout, none of it competing with the
-            title above. */}
-        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ff-textMuted">
-          <span className="flex min-w-0 flex-wrap items-center gap-2 break-words">
-            Uploaded by {document.uploadedBy.name} · {document.reviewBypassed ? "Published without review" : `Reviewer: ${document.owner.name}`}
-            {canManageLifecycle && !isDeleted && document.status === "published" && effectiveCurrentVersion && (
-              <CurrentVersionControl
-                documentId={document.id}
-                currentVersionNumber={effectiveCurrentVersion.versionNumber}
-                currentVersionLabel={versionLabel(effectiveCurrentVersion.id, effectiveCurrentVersion.versionNumber)}
-                versions={document.versions
-                  .filter((v) => approvedVersionIds.has(v.id))
-                  .map((v) => ({ id: v.id, versionNumber: v.versionNumber, label: versionLabel(v.id, v.versionNumber) }))}
+          <div className="flex flex-col gap-3 rounded-b-ff border-t border-ff-border bg-ff-lavender/20 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {!document.category.isSystem && (
+                <Badge variant="neutral" icon={<Tag className="h-3 w-3" aria-hidden />} tooltip="Category">
+                  {document.category.name}
+                </Badge>
+              )}
+              {document.extraCategories.map((e) => (
+                <Badge key={e.categoryId} variant="neutral" icon={<Tag className="h-3 w-3" aria-hidden />} tooltip="Also listed in this category">
+                  {e.category.name}
+                </Badge>
+              ))}
+              <AccessBadges
+                visibility={document.visibility}
+                teamNames={document.teamAccess.map((a) => a.team.name).sort()}
+                reviewBypassed={document.reviewBypassed}
+                downloadable={document.downloadable}
               />
-            )}
-          </span>
-          {!document.category.isSystem && <Badge variant="neutral">{document.category.name}</Badge>}
-          {document.extraCategories.map((e) => (
-            <Badge key={e.categoryId} variant="neutral" tooltip="Also listed in this category">
-              {e.category.name}
-            </Badge>
-          ))}
-          <AccessBadges
-            visibility={document.visibility}
-            teamNames={document.teamAccess.map((a) => a.team.name).sort()}
-            reviewBypassed={document.reviewBypassed}
-            downloadable={document.downloadable}
-          />
-          {document.neverExpires ? (
-            <Badge variant="success">Permanent</Badge>
-          ) : (
-            !isDeleted &&
-            document.status === "published" &&
-            reviewDueInDays !== null && (
-              <Badge variant={reviewDueInDays <= 0 ? "danger" : isReviewDueSoon ? "warning" : "neutral"}>
-                {reviewDueInDays <= 0
-                  ? "Review overdue"
-                  : `Review due in ${reviewDueInDays} day${reviewDueInDays === 1 ? "" : "s"}`}
-              </Badge>
-            )
-          )}
-          {showPurgeCountdown && (
-            <Badge variant="danger">
-              Available for {Math.max(0, daysUntilPurge!)} more day{daysUntilPurge === 1 ? "" : "s"}
-            </Badge>
-          )}
-          {/* A plain "user" (or a contributor who isn't this document's own
-              uploader) is never a stakeholder, so never sees the full
-              Review tab — but they can still reasonably want to know the
-              cycle at a high level: which version, approved by whom. Opens
-              a modal rather than navigating, showing only that (see
-              ReviewHistoryModal.tsx's own comment for exactly what it
-              deliberately leaves out — no rejected attempts, no comments).
-              A stakeholder doesn't need this at all now: their own history
-              is always one click away in the Review tab itself. */}
-          {!isStakeholder && (
-            <ReviewHistoryModal entries={approvalHistory.map((e) => ({ ...e, approvedAt: e.approvedAt?.toISOString() ?? null }))} />
-          )}
-        </div>
-
-
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Secondary/admin actions — visually de-emphasized and grouped
-                ahead of the primary action, separated by a divider, so the
-                one thing most people came here to do (preview/download)
-                stays the visual focus instead of competing with manager-only
-                controls that only sometimes apply. */}
+              {document.neverExpires ? (
+                <Badge variant="success">Permanent</Badge>
+              ) : (
+                !isDeleted &&
+                document.status === "published" &&
+                reviewDueInDays !== null && (
+                  <Badge variant={reviewDueInDays <= 0 ? "danger" : isReviewDueSoon ? "warning" : "neutral"}>
+                    {reviewDueInDays <= 0
+                      ? "Review overdue"
+                      : `Review due in ${reviewDueInDays} day${reviewDueInDays === 1 ? "" : "s"}`}
+                  </Badge>
+                )
+              )}
+              {showPurgeCountdown && (
+                <Badge variant="danger">
+                  Available for {Math.max(0, daysUntilPurge!)} more day{daysUntilPurge === 1 ? "" : "s"}
+                </Badge>
+              )}
+              {/* A plain "user" (or a contributor who isn't this document's own
+                  uploader) is never a stakeholder, so never sees the full
+                  Review tab — but they can still reasonably want to know the
+                  cycle at a high level: which version, approved by whom. Opens
+                  a modal rather than navigating, showing only that (see
+                  ReviewHistoryModal.tsx's own comment for exactly what it
+                  deliberately leaves out — no rejected attempts, no comments).
+                  A stakeholder doesn't need this at all now: their own history
+                  is always one click away in the Review tab itself. */}
+              {!isStakeholder && (
+                <ReviewHistoryModal entries={approvalHistory.map((e) => ({ ...e, approvedAt: e.approvedAt?.toISOString() ?? null }))} />
+              )}
+            </div>
             {(canRestore || canUploadVersion || canDelete || canArchive || canUnarchive) && (
-              <div className="flex flex-wrap items-center gap-1.5 border-r border-ff-border pr-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {canRestore && <RestoreButton documentId={document.id} />}
                 {canUploadVersion && !document.externalUrl && (
                   <UploadVersionForm
@@ -1273,69 +1392,6 @@ export default async function DocumentDetailPage({
                 )}
                 {canDelete && <DeleteButton documentId={document.id} title={document.title} permanent={deletePurges} />}
               </div>
-            )}
-            {!isDeleted && document.externalUrl && (
-              <>
-                <DocumentPreview documentId={document.id} docType={document.docType} externalUrl={document.externalUrl} />
-                {/* isPubliclyVisible, not the raw document.status === "published"
-                    check this used to have: a link document simply back in
-                    re-review after already being published once must stay
-                    shareable, same as the file-based branch below (which
-                    gates on effectiveCurrentVersion, itself isPubliclyVisible-
-                    aware) already does. */}
-                {isPubliclyVisible && (document.shareEnabled && sharingAllowed(document) ? (
-                  <ShareModal documentId={document.id} />
-                ) : (
-                  <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
-                ))}
-                <a
-                  href={document.externalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105"
-                >
-                  Open Link
-                </a>
-              </>
-            )}
-            {!isDeleted && effectiveCurrentVersion && (
-              <>
-                <DocumentPreview
-                  documentId={document.id}
-                  docType={document.docType}
-                  extractedText={effectiveCurrentVersion.extractedText}
-                  hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
-                  previewOnly={previewOnly}
-                />
-                {document.shareEnabled && sharingAllowed(document) ? (
-                  <ShareModal documentId={document.id} />
-                ) : (
-                  <SharingNotAllowedLabel teamOnly={!sharingAllowed(document)} />
-                )}
-                {/* No `versions`/currentVersionNumber here anymore — only
-                    the current live version is ever downloadable, by
-                    anyone, regardless of role. Older versions (including
-                    the newest upload while it's still pending review) are
-                    view-only now: reviewers/contributors look at them via
-                    Preview while reviewing, not Download — see the matching
-                    restriction in app/api/documents/[id]/download/route.ts. */}
-                {previewOnly ? (
-                  <span
-                    title="Downloads are turned off for this document"
-                    className="flex items-center gap-1.5 rounded-ff border border-ff-border bg-ff-lavender/40 px-4 py-2 text-sm text-ff-textMuted"
-                  >
-                    <EyeOff className="h-4 w-4" aria-hidden />
-                    Preview only
-                  </span>
-                ) : (
-                  <DownloadMenu
-                    documentId={document.id}
-                    hasPreviewPdf={Boolean(effectiveCurrentVersion.previewPdfPath)}
-                    docType={document.docType}
-                    variant="cta"
-                  />
-                )}
-              </>
             )}
           </div>
         </div>
@@ -1370,7 +1426,16 @@ export default async function DocumentDetailPage({
 
         {document.status === "archived" && (
           <div className="rounded-ff border border-ff-border bg-ff-lavender/40 p-3 text-sm text-ff-text">
-            This document is archived and hidden from everyone. A manager can restore it, which sends it back for approval.
+            <p>
+              Archived{document.archivedBy && <> by {document.archivedBy.name}</>}
+              {document.archivedAt && <> on <LocalDateTime value={document.archivedAt} /></>}. You can view it, but it
+              can&apos;t be downloaded or shared. A manager can restore it, which sends it back for approval.
+            </p>
+            {document.archiveNote && (
+              <p className="mt-2 whitespace-pre-wrap break-words rounded-ff border border-ff-border bg-white px-3 py-2">
+                <strong>Note:</strong> {document.archiveNote}
+              </p>
+            )}
           </div>
         )}
 
@@ -1392,6 +1457,21 @@ export default async function DocumentDetailPage({
           </div>
         )}
         </div>
+
+        {incomingMerges.length > 0 && (
+          <div className="mb-4">
+            <MergeRequestPanel
+              requests={incomingMerges.map((m) => ({
+                id: m.id,
+                sourceId: m.sourceId,
+                sourceTitle: m.source.title,
+                sourceVisible: visibleMergeSources.has(m.sourceId),
+                requestedByName: m.requestedBy.name,
+                createdAt: m.createdAt.toISOString(),
+              }))}
+            />
+          </div>
+        )}
 
         {showEveryoneDecision && (
           <div className="mb-4">

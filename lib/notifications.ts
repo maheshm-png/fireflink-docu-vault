@@ -9,7 +9,7 @@ import { documentAccessWhere, type AccessUser } from "./access";
 export async function createNotifications(
   items: {
     userId: string;
-    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied" | "share_requested" | "leadership_comment" | "everyone_requested" | "everyone_approved" | "everyone_sent_back";
+    type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied" | "share_requested" | "leadership_comment" | "everyone_requested" | "everyone_approved" | "everyone_sent_back" | "merge_requested" | "merge_approved" | "merge_declined";
     title: string;
     body?: string;
     documentId?: string;

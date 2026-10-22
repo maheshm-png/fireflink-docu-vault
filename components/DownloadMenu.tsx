@@ -11,7 +11,7 @@ const EXT_LABEL: Record<string, string> = {
 };
 
 const CTA_CLASSES =
-  "rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105";
+  "inline-flex items-center gap-1.5 rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105";
 const ICON_CLASSES = "rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-accent";
 const LINK_CLASSES = "text-ff-accent hover:underline";
 
@@ -24,7 +24,7 @@ const LINK_CLASSES = "text-ff-accent hover:underline";
  * download action, same as before.
  *
  * `variant`: "icon" (default, compact — dashboard list/grid rows) or "cta"
- * (the document detail page's full-width "Download Current Version" button).
+ * (the document detail page's main "Download" button).
  * `asButton` renders as a <button> that opens a new tab via window.open
  * instead of <a href> — required wherever this sits inside an already-
  * clickable <Link> card (DocumentGrid), since a nested <a> inside an <a> is
@@ -125,7 +125,7 @@ export default function DownloadMenu({
   const triggerClasses =
     variant === "cta" ? CTA_CLASSES : variant === "link" ? LINK_CLASSES : ICON_CLASSES;
   const triggerLabel =
-    variant === "cta" ? "Download Current Version" : variant === "link" ? "Download" : undefined;
+    variant === "cta" ? "Download" : variant === "link" ? "Download" : undefined;
 
   if (!hasPreviewPdf && !hasMultiVersion) {
     return asButton ? (
@@ -140,11 +140,11 @@ export default function DownloadMenu({
         aria-label={triggerLabel ?? "Download"}
         className={triggerClasses}
       >
-        {triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
+        {variant === "cta" ? <><Download className="h-4 w-4" aria-hidden />{triggerLabel}</> : triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
       </button>
     ) : (
       <a href={plainUrl} title={triggerLabel ?? "Download"} aria-label={triggerLabel ?? "Download"} className={triggerClasses}>
-        {triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
+        {variant === "cta" ? <><Download className="h-4 w-4" aria-hidden />{triggerLabel}</> : triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
       </a>
     );
   }
@@ -166,9 +166,9 @@ export default function DownloadMenu({
         aria-label="Download options"
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`inline-flex items-center gap-0.5 ${triggerClasses}`}
+        className={variant === "cta" ? triggerClasses : `inline-flex items-center gap-0.5 ${triggerClasses}`}
       >
-        {triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
+        {variant === "cta" ? <><Download className="h-4 w-4" aria-hidden />{triggerLabel}</> : triggerLabel ?? <Download className="h-4 w-4" aria-hidden />}
         <ChevronDown className={variant === "icon" ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
       </button>
       {open &&

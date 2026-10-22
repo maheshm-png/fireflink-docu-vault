@@ -48,6 +48,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       document.currentVersionId
     );
   const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+  // Archived after being published: anyone who could see it may still open
+  // and preview it, but nobody can download it (see /download).
+  const archivedViewable = hasEverPublished && document.status === "archived";
 
   // Uploader/owner/an assigned reviewer (any round)/superadmin can see a
   // not-yet-public document too; a manager with no assignment on THIS
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // canSeeUnpublishedDoc (its own comment has the full reasoning). Everyone
   // else only ever reaches publicly visible ones (also enforced by DB-level RLS).
   const canSeeUnpublished =
-    (isPubliclyVisible && teamAllows(user, document)) ||
+    ((isPubliclyVisible || archivedViewable) && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequestsForVisibility.some((r) => r.reviewerId === user.id) ||

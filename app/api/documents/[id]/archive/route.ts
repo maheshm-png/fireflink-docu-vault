@@ -38,11 +38,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Only published, rejected, or revoked documents can be archived" }, { status: 400 });
   }
 
+  // Optional note saying why, shown to everyone who opens it while archived.
+  const body = await req.json().catch(() => ({}));
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 1000) : "";
+
   if (document.status === "published") {
     await removeFromIndex(document.id);
   }
 
-  await prisma.document.update({ where: { id: document.id }, data: { status: "archived" } });
+  await prisma.document.update({
+    where: { id: document.id },
+    data: { status: "archived", archiveNote: note || null, archivedAt: new Date(), archivedById: user.id },
+  });
 
   await logAudit({ userId: user.id, action: "archive", documentId: document.id, documentTitle: document.title });
 
@@ -53,7 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       where: { AND: [{ isActive: true }, usersWhoCanSeeWhere(document)] },
       select: { id: true, name: true },
     });
-    fireNotification(notifyDocumentRevoked({ documentTitle: document.title, documentId: document.id, recipients }));
+    fireNotification(notifyDocumentRevoked({ documentTitle: document.title, documentId: document.id, recipients, note: note || undefined }));
   }
 
   return NextResponse.json({ ok: true });

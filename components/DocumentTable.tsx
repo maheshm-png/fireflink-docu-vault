@@ -239,7 +239,7 @@ export default function DocumentTable({
               <col className="w-[7%]" />
             </colgroup>
           )}
-          <thead className="sticky top-0 z-10 border-b-2 border-ff-accent/20 bg-ff-lavender text-xs font-semibold uppercase tracking-wide text-ff-textMuted">
+          <thead className="sticky top-0 z-10 border-b border-ff-border bg-[#F4E9F2] text-xs font-semibold uppercase tracking-wide text-[#5B1F51]">
             <tr>
               <th className="px-4 py-3 font-medium">Name</th>
               {showInvolvement && <th className="px-4 py-3 font-medium">Your part</th>}

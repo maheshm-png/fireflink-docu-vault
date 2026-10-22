@@ -117,12 +117,15 @@ model User {
   isGlobalApprover      Boolean                @default(false)
   globalRequestsRaised  GlobalPublishRequest[] @relation("GlobalRequestRaisedBy")
   globalRequestsDecided GlobalPublishRequest[] @relation("GlobalRequestDecidedBy")
+  mergeRequestsRaised   MergeRequest[]         @relation("MergeRequestRaisedBy")
+  mergeRequestsToDecide MergeRequest[]         @relation("MergeRequestApprover")
 
   teamFoldersCreated     TeamFolder[]         @relation("TeamFolderCreatedBy")
   uploadedDocuments      Document[]           @relation("UploadedBy")
   ownedDocuments         Document[]           @relation("OwnedBy")
   deletedDocuments       Document[]           @relation("DeletedBy")
   revokedDocuments       Document[]           @relation("RevokedBy")
+  archivedDocuments      Document[]           @relation("ArchivedBy")
   uploadedVersions       DocumentVersion[]
   reviewsRequested       ReviewRequest[]      @relation("RequestedBy")
   reviewsAssigned        ReviewRequest[]      @relation("ReviewerFor")
@@ -207,13 +210,13 @@ model UserTeam {
 // while the document is "org". Kept as rows rather than a single teamId so a
 // document can be shared with more than one team.
 model DocumentTeamAccess {
-  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document    Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentId  String
-  team        Team     @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  team        Team        @relation(fields: [teamId], references: [id], onDelete: Restrict)
   teamId      String
-  grantedBy   User     @relation("TeamAccessGrantedBy", fields: [grantedById], references: [id])
+  grantedBy   User        @relation("TeamAccessGrantedBy", fields: [grantedById], references: [id])
   grantedById String
-  createdAt   DateTime @default(now())
+  createdAt   DateTime    @default(now())
   // Where this team files the document inside My teams (null = not in a
   // folder). Per team, since one document can belong to several teams.
   folder      TeamFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
@@ -296,7 +299,7 @@ model Category {
   createdById     String
   createdAt       DateTime @default(now())
 
-  documents Document[]
+  documents      Document[]
   // Documents whose main category is elsewhere but which are also listed here.
   extraDocuments DocumentCategory[]
 }
@@ -325,9 +328,13 @@ model Document {
 
   // See DocVisibility. Defaults to "org" so every document that existed
   // before team access keeps behaving exactly as it did.
-  visibility     DocVisibility          @default(org)
-  teamAccess     DocumentTeamAccess[]
-  globalRequests GlobalPublishRequest[]
+  visibility      DocVisibility          @default(org)
+  teamAccess      DocumentTeamAccess[]
+  globalRequests  GlobalPublishRequest[]
+  // Merge requests (lib/merge.ts): this document as the copy to remove
+  // (mergeRequestsOut) or as the one to keep (mergeRequestsIn).
+  mergeRequestsOut MergeRequest[] @relation("MergeSource")
+  mergeRequestsIn  MergeRequest[] @relation("MergeTarget")
   // "Also show in": extra categories this document is listed under, besides
   // its main category (categoryId), which alone decides its detail fields.
   extraCategories DocumentCategory[]
@@ -426,6 +433,14 @@ model Document {
   revokedAt    DateTime?
   revokedBy    User?     @relation("RevokedBy", fields: [revokedById], references: [id])
   revokedById  String?
+
+  // Archive (app/api/documents/[id]/archive/route.ts): an optional note
+  // saying why, plus who archived it and when. Shown on the document and
+  // the Archived documents page. Cleared when the document is restored.
+  archiveNote  String?
+  archivedAt   DateTime?
+  archivedBy   User?     @relation("ArchivedBy", fields: [archivedById], references: [id])
+  archivedById String?
 
   // Soft-delete: DELETE /api/documents/:id sets these instead of removing
   // the row outright, so a manager/superadmin can restore within a 30-day
@@ -841,4 +856,34 @@ model DocumentCategory {
 
   @@id([documentId, categoryId])
   @@index([categoryId])
+}
+
+enum MergeRequestStatus {
+  pending
+  approved
+  declined
+  withdrawn
+}
+
+// Asking to merge one document (source, removed) into another (target,
+// kept), when the person asking doesn't manage the target (lib/merge.ts).
+// The target's manager (approverId) approves, which runs the merge, or
+// declines. A manager of both documents merges directly, with no request.
+model MergeRequest {
+  id            String             @id @default(uuid())
+  source        Document           @relation("MergeSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId      String
+  target        Document           @relation("MergeTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  targetId      String
+  requestedBy   User               @relation("MergeRequestRaisedBy", fields: [requestedById], references: [id])
+  requestedById String
+  approver      User               @relation("MergeRequestApprover", fields: [approverId], references: [id])
+  approverId    String
+  status        MergeRequestStatus @default(pending)
+  createdAt     DateTime           @default(now())
+  decidedAt     DateTime?
+
+  @@index([approverId, status])
+  @@index([sourceId])
+  @@index([targetId])
 }

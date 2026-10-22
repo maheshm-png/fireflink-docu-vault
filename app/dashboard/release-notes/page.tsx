@@ -37,6 +37,7 @@ const RELEASE_NOTES: ReleaseNote[] = [
           { title: "Review before publishing", detail: "Every upload goes to a reviewer, who approves it or sends it back with comments, including comments on highlighted text." },
           { title: "Versions", detail: "Upload a new version after feedback, see every round of review, and compare any two versions side by side." },
           { title: "Duplicate check", detail: "You're warned when a file or title already exists before uploading it again." },
+          { title: "Merge", detail: "Uploaded the same thing twice, like a video under two names? Merge it into the copy to keep. If that document isn't yours to manage, its manager approves first." },
           { title: "No review needed", detail: "Managers can publish their own upload straight away. It's labelled Review Bypassed so everyone can see it." },
           { title: "My Work", detail: "What's waiting on you, everything you uploaded and everything you reviewed, in one place." },
         ],
@@ -67,7 +68,7 @@ const RELEASE_NOTES: ReleaseNote[] = [
         items: [
           { title: "Notifications", detail: "The bell tells you about reviews waiting on you, decisions on your uploads and new documents for you." },
           { title: "Announcements", detail: "Managers post announcements everyone sees on Home." },
-          { title: "What can I do?", detail: "Every document page and Help > What can I do? say plainly what you can and can't do with your roles." },
+          { title: "My permissions", detail: "Every document page and Help > My permissions say plainly what you can and can't do with your roles." },
         ],
       },
       {

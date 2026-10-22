@@ -99,7 +99,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
 
   await prisma.document.update({
     where: { id: document.id },
-    data: { status: "revoked", revokeReason: null, revokedById: user.id, revokedAt: new Date() },
+    data: { status: "revoked", revokeReason: null, revokedById: user.id, revokedAt: new Date(), archiveNote: null, archivedAt: null, archivedById: null },
   });
 
   await prisma.reviewRequest.createMany({

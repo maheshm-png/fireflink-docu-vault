@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock, ChevronRight, Archive } from "lucide-react";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Pagination from "@/components/Pagination";
@@ -11,7 +11,6 @@ import { documentAccessWhere } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import InfoTooltip from "@/components/InfoTooltip";
 import FilterBar from "@/components/FilterBar";
 import CategoryTabs from "@/components/CategoryTabs";
 import DocumentFilters from "@/components/DocumentFilters";
@@ -30,14 +29,14 @@ import TeamSpaceView from "./TeamSpaceView";
 // Quick-access tile colors, cycled by position. Full class strings so
 // Tailwind keeps them.
 const TILE_COLORS = [
-  { tile: "border-violet-200 bg-violet-50 hover:border-violet-400", icon: "bg-violet-500 text-white" },
-  { tile: "border-sky-200 bg-sky-50 hover:border-sky-400", icon: "bg-sky-500 text-white" },
-  { tile: "border-emerald-200 bg-emerald-50 hover:border-emerald-400", icon: "bg-emerald-500 text-white" },
-  { tile: "border-amber-200 bg-amber-50 hover:border-amber-400", icon: "bg-amber-500 text-white" },
-  { tile: "border-rose-200 bg-rose-50 hover:border-rose-400", icon: "bg-rose-500 text-white" },
-  { tile: "border-teal-200 bg-teal-50 hover:border-teal-400", icon: "bg-teal-500 text-white" },
-  { tile: "border-indigo-200 bg-indigo-50 hover:border-indigo-400", icon: "bg-indigo-500 text-white" },
-  { tile: "border-orange-200 bg-orange-50 hover:border-orange-400", icon: "bg-orange-500 text-white" },
+  "bg-violet-100 text-violet-600",
+  "bg-sky-100 text-sky-600",
+  "bg-emerald-100 text-emerald-600",
+  "bg-amber-100 text-amber-600",
+  "bg-rose-100 text-rose-600",
+  "bg-teal-100 text-teal-600",
+  "bg-indigo-100 text-indigo-600",
+  "bg-orange-100 text-orange-600",
 ];
 
 export default async function DashboardPage({
@@ -284,40 +283,56 @@ export default async function DashboardPage({
         <NewDocumentsProvider initialDocumentIds={newDocIds} initialCategoryIds={newCategoryIds} initialRecentDocs={recentDocs} scopeQuery="scope=everyone">
           <AnnouncementTicker />
           {isLanding ? (
-            <section className="mb-8">
-              <h2 className="mb-3 text-base font-bold text-ff-text">Quick access</h2>
+            <section className="mb-6">
+              <div className="mb-3 flex items-baseline justify-between gap-2">
+                <h2 className="text-base font-semibold text-ff-text">Browse by category</h2>
+                <span className="text-xs text-ff-textMuted">
+                  {categories.length} categor{categories.length === 1 ? "y" : "ies"}
+                </span>
+              </div>
               {categories.length === 0 ? (
-                <div className="rounded-ff border border-ff-border bg-white p-6 text-center text-sm text-ff-textMuted">
+                <div className="rounded-ff border border-dashed border-ff-border bg-white p-6 text-center text-sm text-ff-textMuted">
                   No categories yet.
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                  {categoryTabs.map((c, i) => {
-                    const color = TILE_COLORS[i % TILE_COLORS.length];
-                    return (
-                      <Link
-                        key={c.id}
-                        href={`/dashboard?category=${c.id}`}
-                        className={`relative flex items-center gap-3 rounded-ff border px-3 py-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-ff ${color.tile}`}
-                      >
-                        <LiveNewCategoryBadge categoryId={c.id} className="absolute -right-1.5 -top-1.5" />
-                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-ff ${color.icon}`}>
-                          <CategoryIcon name={c.name} className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-ff-text" title={c.name}>
-                            {c.name}
-                          </p>
-                          <p className="text-xs text-ff-textMuted">
-                            {c.count} document{c.count === 1 ? "" : "s"}
-                          </p>
-                        </div>
-                      </Link>
-                    );
-                  })}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {categoryTabs.map((c, i) => (
+                    <Link
+                      key={c.id}
+                      href={`/dashboard?category=${c.id}`}
+                      className="group relative flex items-center gap-3 rounded-ff border border-ff-border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-ff-accent/40 hover:shadow-ff"
+                    >
+                      <LiveNewCategoryBadge categoryId={c.id} className="absolute -right-1.5 -top-1.5" />
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-ff ${TILE_COLORS[i % TILE_COLORS.length]}`}>
+                        <CategoryIcon name={c.name} className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-ff-text" title={c.name}>
+                          {c.name}
+                        </p>
+                        <p className="text-xs text-ff-textMuted">
+                          {c.count} document{c.count === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-ff-textMuted transition-transform group-hover:translate-x-0.5 group-hover:text-ff-accent"
+                        aria-hidden
+                      />
+                    </Link>
+                  ))}
                 </div>
               )}
-              <h2 className="mb-3 mt-8 text-base font-bold text-ff-text">All published documents</h2>
+              <div className="mb-3 mt-8 flex flex-wrap items-center gap-2 border-t border-ff-border pt-6">
+                <h2 className="text-base font-semibold text-ff-text">All published documents</h2>
+                <span className="rounded-full bg-ff-lavender px-2 py-0.5 text-xs font-medium text-ff-accent">{totalRows}</span>
+                <Link
+                  href="/dashboard/archived"
+                  className="ml-auto inline-flex items-center gap-1.5 text-sm text-ff-textMuted hover:text-ff-accent"
+                >
+                  <Archive className="h-4 w-4" aria-hidden />
+                  Archived documents
+                </Link>
+              </div>
             </section>
           ) : (
             <CategoryTabs categories={categoryTabs} basePath="/dashboard" />
@@ -377,28 +392,24 @@ function HomeShell({ user, space, children }: { user: ShellUser; space: "everyon
       <Navbar role={user.role} userName={user.name} userEmail={user.email} userTeam={user.team?.name} userReportsTo={user.reportsTo?.name} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-7xl px-6 py-8 animate-fade-in">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="flex items-center gap-1.5 text-2xl font-bold tracking-tight text-ff-text">
-                Welcome, {user.name.split(" ")[0]}
-                <InfoTooltip
-                  text={
-                    space === "everyone"
-                      ? "Everyone: documents everyone in FireFlink can see."
-                      : "My teams: confidential documents of your teams. Only your teams can see them."
-                  }
-                />
-              </h1>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight text-ff-text">Welcome, {user.name.split(" ")[0]}</h1>
+              <p className="mt-0.5 text-sm text-ff-textMuted">
+                {space === "everyone"
+                  ? "Documents everyone in FireFlink can see."
+                  : "Confidential documents of your teams. Only your teams can see them."}
+              </p>
             </div>
-            <div className="flex gap-1 rounded-ff border border-ff-border bg-ff-lavender/40 p-0.5 text-sm" role="tablist">
+            <div className="flex gap-1 rounded-full border border-ff-border bg-white p-1 text-sm shadow-sm" role="tablist">
               {views.map((v) => (
                 <Link
                   key={v.key}
                   href={v.href}
                   role="tab"
                   aria-selected={space === v.key}
-                  className={`flex items-center gap-1.5 rounded-ff px-3 py-1.5 ${
-                    space === v.key ? "bg-white font-medium text-ff-text shadow-sm" : "text-ff-textMuted hover:text-ff-text"
+                  className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 transition-colors ${
+                    space === v.key ? "bg-ff-accent-gradient font-medium text-white shadow-ff" : "text-ff-textMuted hover:bg-ff-lavender/60 hover:text-ff-text"
                   }`}
                 >
                   <v.icon className="h-3.5 w-3.5" aria-hidden />

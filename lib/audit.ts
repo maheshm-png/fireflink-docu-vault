@@ -20,7 +20,7 @@ export type AuditAction =
   | "upload" | "approve" | "reject" | "delete"
   | "download" | "login" | "role_change" | "edit" | "revoke"
   | "archive" | "unarchive" | "restore" | "purge"
-  | "extend_validity" | "toggle_permanent" | "dismiss_duplicate" | "set_current_version"
+  | "extend_validity" | "toggle_permanent" | "dismiss_duplicate" | "merge" | "merge_request" | "merge_request_declined" | "set_current_version"
   | "post_announcement" | "edit_announcement" | "hold_announcement" | "resume_announcement" | "delete_announcement"
   | "reassign_review" | "request_second_opinion" | "undo_approval"
   | "remove_user" | "restore_user" | "reset_password"

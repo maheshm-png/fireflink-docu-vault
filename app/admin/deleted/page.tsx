@@ -44,7 +44,7 @@ export default async function DeletedDocumentsPage() {
         ) : (
           <div className="overflow-hidden rounded-ff border border-ff-border bg-white shadow-ff">
             <table className="w-full text-left text-sm">
-              <thead className="border-b-2 border-ff-accent/20 bg-ff-lavender text-xs font-semibold uppercase tracking-wide text-ff-textMuted">
+              <thead className="border-b border-ff-border bg-[#F4E9F2] text-xs font-semibold uppercase tracking-wide text-[#5B1F51]">
                 <tr>
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Category</th>

@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { canManageFolders, passesTeamGate } from "@/lib/access";
+import { canFileIntoFolders, passesTeamGate } from "@/lib/access";
 
 // PATCH /api/documents/:id/folder — { teamId, folderId: string | null }
 // Files a team document into one of that team's folders (null = no folder).
-// The team's managers and superadmins only.
+// The team's contributors and managers, and superadmins.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -16,8 +16,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (typeof teamId !== "string" || (folderId !== null && typeof folderId !== "string")) {
     return NextResponse.json({ error: "Send teamId and folderId (or null)." }, { status: 400 });
   }
-  if (!canManageFolders(user, teamId)) {
-    return NextResponse.json({ error: "Only a manager of this team can move its documents between folders." }, { status: 403 });
+  if (!canFileIntoFolders(user, teamId)) {
+    return NextResponse.json({ error: "Only a contributor or manager of this team can move its documents between folders." }, { status: 403 });
   }
   const access = await prisma.documentTeamAccess.findUnique({
     where: { documentId_teamId: { documentId: params.id, teamId } },

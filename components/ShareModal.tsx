@@ -128,10 +128,10 @@ export default function ShareModal({ documentId }: { documentId: string }) {
         type="button"
         onClick={openModal}
         title="Share"
-        aria-label="Share"
-        className="rounded p-1.5 text-ff-textMuted transition-colors hover:bg-ff-lavender hover:text-ff-accent"
+        className="flex items-center gap-1.5 rounded-ff border border-ff-border bg-white px-4 py-2 text-sm text-ff-text transition-colors hover:bg-ff-lavender"
       >
         <Share2 className="h-4 w-4" aria-hidden />
+        Share
       </button>
 
       {open && (

@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus, XCircle, ThumbsUp, AtSign, Reply, Share2, MessageSquare, Globe, CornerUpLeft } from "lucide-react";
+import { Bell, X, CheckCheck, BellRing, BellOff, FileCheck, Undo2, FilePlus, XCircle, ThumbsUp, AtSign, Reply, Share2, MessageSquare, Globe, CornerUpLeft, GitMerge } from "lucide-react";
 import { formatDateTime } from "@/lib/formatDate";
 
 type NotificationItem = {
   id: string;
-  type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied" | "share_requested" | "leadership_comment" | "everyone_requested" | "everyone_approved" | "everyone_sent_back";
+  type: "published" | "revoked" | "new_version" | "approved" | "rejected" | "feedback_accepted" | "feedback_tagged" | "feedback_replied" | "share_requested" | "leadership_comment" | "everyone_requested" | "everyone_approved" | "everyone_sent_back" | "merge_requested" | "merge_approved" | "merge_declined";
   title: string;
   body: string | null;
   documentId: string | null;
@@ -47,6 +47,9 @@ const TYPE_ICON: Record<NotificationItem["type"], typeof FileCheck> = {
   everyone_requested: Globe,
   everyone_approved: Globe,
   everyone_sent_back: CornerUpLeft,
+  merge_requested: GitMerge,
+  merge_approved: GitMerge,
+  merge_declined: CornerUpLeft,
 };
 
 export default function NotificationBell({ collapsed }: { collapsed: boolean }) {

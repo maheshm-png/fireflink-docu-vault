@@ -129,10 +129,8 @@ export default function UploadVersionForm({
       <button
         onClick={() => setOpen(true)}
         title={isRejected ? "Replace with a new version" : "Upload a new version"}
-        // Highlighted with the platform's primary button style (the same
-        // plum gradient as Upload Document / Approve), so it reads as the
-        // main next step while matching the rest of the app.
-        className="flex items-center gap-1.5 rounded-ff bg-ff-accent-gradient px-3 py-2 text-sm font-semibold text-white shadow-ff ring-2 ring-ff-accent/20 transition-all hover:shadow-ff-md hover:brightness-110"
+        // Primary style: for whoever sees it, a new version is a main action.
+        className="flex items-center gap-1.5 rounded-ff bg-ff-accent-gradient px-3 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105"
       >
         <FileUp className="h-4 w-4" aria-hidden />
         {isRejected ? "Replace Document" : "Upload New Version"}

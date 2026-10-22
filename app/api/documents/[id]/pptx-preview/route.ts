@@ -33,13 +33,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const approvedVersionIds = everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt);
   const hasEverPublished = document.currentVersionId !== null && approvedVersionIds.has(document.currentVersionId);
   const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+  // Archived after being published: anyone who could see it may still open
+  // and preview it, but nobody can download it (see /download).
+  const archivedViewable = hasEverPublished && document.status === "archived";
 
   // Uploader/owner/an assigned reviewer (any round)/superadmin, same
   // narrower rule as app/dashboard/documents/[id]/page.tsx's
   // canSeeUnpublishedDoc — a manager with no assignment on this document
   // can't preview its still-pending content early either.
   const canAccessUnpublished =
-    (isPubliclyVisible && teamAllows(user, document)) ||
+    ((isPubliclyVisible || archivedViewable) && teamAllows(user, document)) ||
     document.uploadedById === user.id ||
     document.ownerId === user.id ||
     reviewRequests.some((r) => r.reviewerId === user.id) ||

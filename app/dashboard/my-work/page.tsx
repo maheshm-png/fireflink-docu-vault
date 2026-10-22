@@ -96,10 +96,17 @@ export default async function MyWorkPage({
     review: {
       deletedAt: null,
       OR: [
-        { status: "pending_review", reviewRequests: { some: { reviewerId: user.id, status: "pending" } } },
+        // A restored archived document ("Back in review", status revoked) is
+        // in review too, same as statusesFor("pending_review").
+        {
+          status: { in: statusesFor("pending_review") },
+          reviewRequests: { some: { reviewerId: user.id, status: "pending" } },
+        },
         ...(decidesEveryoneRequests(user)
           ? [{ globalRequests: { some: { status: "pending" as const, requestedById: { not: user.id } } } }]
           : []),
+        // Merge requests into a document I manage (lib/merge.ts).
+        { mergeRequestsIn: { some: { approverId: user.id, status: "pending", source: { deletedAt: null } } } },
       ],
     },
     uploads: {
@@ -158,6 +165,10 @@ export default async function MyWorkPage({
           select: { status: true, decidedById: true, decidedAt: true, requestedById: true },
           orderBy: { createdAt: "desc" },
         },
+        mergeRequestsIn: {
+          where: { approverId: user.id, status: "pending", source: { deletedAt: null } },
+          select: { source: { select: { title: true } }, requestedBy: { select: { name: true } } },
+        },
       },
       orderBy: { updatedAt: "desc" },
     }),
@@ -188,10 +199,15 @@ export default async function MyWorkPage({
           const when = (mine.resolvedAt ?? mine.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
           statusDetail = `You ${mine.status} this on ${when}.`;
         }
-      } else if (activeTab === "review" && doc.status !== "pending_review") {
+      } else if (activeTab === "review" && doc.mergeRequestsIn.length > 0) {
+        statusLabel = "Merge request";
+        statusDetail = doc.mergeRequestsIn
+          .map((m) => `${m.requestedBy.name} asks to merge "${m.source.title}" into this.`)
+          .join(" ");
+      } else if (activeTab === "review" && !statusesFor("pending_review").includes(doc.status)) {
         statusLabel = "Request for Everyone";
         statusDetail = "Open it to the whole organization, or send it back.";
-      } else if (doc.status === "pending_review") {
+      } else if (statusesFor("pending_review").includes(doc.status)) {
         const waiting = [...new Set(doc.reviewRequests.filter((r) => r.status === "pending").map((r) => r.reviewer.name))];
         if (waiting.length) statusDetail = `Waiting on ${waiting.join(", ")}.`;
       }
@@ -495,11 +511,12 @@ function describeInvolvement(
     // as the "Waiting on me" tab. Older data can hold a leftover "pending"
     // row on a document that has since been decided (e.g. a duplicate
     // assignment in the same round), which must not read as a task.
-    const pending = doc.status === "pending_review" && mine.some((r) => r.status === "pending");
+    const inReview = statusesFor("pending_review").includes(doc.status as DocStatus);
+    const pending = inReview && mine.some((r) => r.status === "pending");
     // In review but not on me: say who it's waiting on, so it isn't
     // mistaken for my task (the "In review" filter counts these too).
     const waitingOnOthers =
-      doc.status === "pending_review"
+      inReview
         ? [...new Set(doc.reviewRequests.filter((r) => r.status === "pending" && r.reviewerId !== userId).map((r) => r.reviewer.name))].join(", ")
         : "";
     const decided = mine.filter((r) => r.status !== "pending");

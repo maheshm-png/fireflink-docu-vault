@@ -38,7 +38,7 @@ export default function FilterBar({
       {canUpload && (
         <a
           href={uploadHref}
-          className="flex items-center gap-1 rounded-ff bg-ff-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105"
+          className="flex h-9 items-center gap-1 rounded-full bg-ff-accent-gradient px-4 text-sm font-medium text-white shadow-ff transition-all hover:shadow-ff-md hover:brightness-105"
         >
           <Plus className="h-4 w-4" aria-hidden />
           {uploadLabel}

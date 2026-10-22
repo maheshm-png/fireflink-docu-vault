@@ -73,6 +73,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (document.deletedAt) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  // Archived documents can be viewed and previewed, never downloaded, by
+  // anyone. A manager restores it first if a copy is needed.
+  if (document.status === "archived") {
+    return NextResponse.json({ error: "Archived documents can be viewed but not downloaded." }, { status: 403 });
+  }
 
   const reviewRequests = await prisma.reviewRequest.findMany({
     where: { documentId: document.id },
@@ -89,7 +94,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const hasEverPublished =
     document.currentVersionId !== null &&
     everApprovedVersionIds(document.versions, reviewRequests, document.revokedAt).has(document.currentVersionId);
-  const isPubliclyVisible = hasEverPublished && document.status !== "revoked" && document.status !== "archived";
+  // Archived already returned above.
+  const isPubliclyVisible = hasEverPublished && document.status !== "revoked";
 
   // Uploader/owner/an assigned reviewer (any round)/superadmin, same
   // narrower rule as app/dashboard/documents/[id]/page.tsx's

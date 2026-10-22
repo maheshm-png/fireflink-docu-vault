@@ -62,20 +62,16 @@ The app is containerized (`Dockerfile`) for handoff to devops:
    update both files and rebuild (`docker compose up -d --build app`) — a
    runtime-only `.env` change won't retroactively fix an already-built
    image.
-4. **Two one-time setup steps Docker doesn't do for you**:
-   - Create the MinIO bucket (`MINIO_BUCKET`, `fireflink-docs` by default)
-     via the MinIO console (port 9001) or `mc mb` — nothing creates it
-     automatically, and uploads will fail until it exists.
-   - Run `npm run search:setup` once (inside the running `app` container,
-     e.g. `docker compose exec app npm run search:setup`) to configure
-     Meilisearch's searchable/filterable attributes — without it, the
-     dashboard's category/type/staleness filters silently return nothing.
-5. **Migrations run automatically**: the container's entrypoint runs
-   `prisma migrate deploy` (against `DIRECT_URL`) before starting the
-   server, so a fresh deploy of a new image version applies any pending
-   migrations on its own — no separate manual step. Still paste
-   `prisma/rls_policies.sql` into the Supabase SQL editor once, after the
-   first migration.
+4. **One one-time setup step Docker doesn't do for you**: create the MinIO
+   bucket (`MINIO_BUCKET`, `fireflink-docs` by default) via the MinIO
+   console (port 9001) or `mc mb`. Nothing creates it automatically, and
+   uploads will fail until it exists.
+5. **Everything else runs automatically on every container start**
+   (`docker-entrypoint.sh`): `prisma migrate deploy` (against
+   `DIRECT_URL`), then `prisma/rls_policies.sql`, then the Meilisearch
+   index settings (`scripts/setup-search.ts`). So building and starting a
+   new image is the whole deploy. If the RLS or search step fails, the
+   container logs a WARNING and still starts; check `docker compose logs app`.
 6. **Reverse proxy + TLS — handled by the `caddy` service**: it's the only
    thing in `infra/docker-compose.yml` bound to the host's public ports
    (80/443); app/minio/meilisearch/ollama aren't published to the host at

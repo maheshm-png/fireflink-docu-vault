@@ -1,5 +1,6 @@
 -- Row Level Security (RLS) policies for Supabase Postgres
--- Apply after `prisma migrate deploy`, via Supabase SQL editor.
+-- Applied automatically after `prisma migrate deploy` on every container
+-- start (docker-entrypoint.sh). Can also be run by hand in the SQL editor.
 -- These are a second, DB-level enforcement layer — the app must never
 -- rely on the frontend alone to hide unauthorized data.
 --
@@ -447,3 +448,7 @@ alter table "DocumentCategory" enable row level security;
 
 -- Leadership view of selected teams: app-managed only, no PostgREST access.
 alter table "UserViewTeam" enable row level security;
+
+-- Merge requests (lib/merge.ts): managed only by the app over its own
+-- connection. RLS with no policy denies all PostgREST access.
+alter table "MergeRequest" enable row level security;

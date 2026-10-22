@@ -21,13 +21,13 @@ export default function ViewToggle({ basePath }: { basePath: string }) {
   }
 
   return (
-    <div className="flex shrink-0 items-center overflow-hidden rounded-ff border border-ff-border bg-white">
+    <div className="flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-ff-border bg-white p-0.5">
       <button
         type="button"
         onClick={() => setView("list")}
         aria-label="List view"
         aria-pressed={view === "list"}
-        className={`p-2 transition-colors ${view === "list" ? "bg-ff-lavender text-ff-accent" : "text-ff-textMuted hover:text-ff-text"}`}
+        className={`flex h-full items-center rounded-full px-2.5 transition-colors ${view === "list" ? "bg-ff-lavender text-ff-accent" : "text-ff-textMuted hover:text-ff-text"}`}
       >
         <List className="h-4 w-4" aria-hidden />
       </button>
@@ -36,7 +36,7 @@ export default function ViewToggle({ basePath }: { basePath: string }) {
         onClick={() => setView("grid")}
         aria-label="Grid view"
         aria-pressed={view === "grid"}
-        className={`p-2 transition-colors ${view === "grid" ? "bg-ff-lavender text-ff-accent" : "text-ff-textMuted hover:text-ff-text"}`}
+        className={`flex h-full items-center rounded-full px-2.5 transition-colors ${view === "grid" ? "bg-ff-lavender text-ff-accent" : "text-ff-textMuted hover:text-ff-text"}`}
       >
         <LayoutGrid className="h-4 w-4" aria-hidden />
       </button>

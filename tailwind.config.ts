@@ -50,17 +50,12 @@ const config: Config = {
         // rather than just a paler plum, so the two ends read as distinct
         // shades rather than one flat color with a faint vignette.
         "ff-plum-gradient": "linear-gradient(120deg, #7C3B74 0%, #4A2350 45%, #241026 100%)",
-        // Every primary button app-wide (Save/Upload/Approve/Submit, admin
-        // forms, the share modal, etc.) now points at the same plum gradient
-        // as the nav bar rather than its own separate magenta one — was a
-        // distinct linear-gradient(135deg, #8E2E7A, #A6398F) before; aliased
-        // here (not just left to bit-rot as a second unused gradient) so the
-        // two tokens can never drift apart again by editing only one of
-        // them. ff.accent itself (the plain solid hex, used for text/links/
-        // active pills — not this background-image) is intentionally left
-        // alone: this only changes gradient FILLS, not the accent color as
-        // a whole.
-        "ff-accent-gradient": "linear-gradient(120deg, #7C3B74 0%, #4A2350 45%, #241026 100%)",
+        // Every primary button app-wide (Save/Upload/Approve/Submit,
+        // Download, Apply, admin forms, the share modal, etc.). A flat fill
+        // of ff.accent, not a real gradient: darker gradients looked heavy
+        // across the app. Kept as a backgroundImage token so every button
+        // that uses bg-ff-accent-gradient changes from this one line.
+        "ff-accent-gradient": "linear-gradient(#8E2E7A, #8E2E7A)",
         "ff-surface-gradient": "linear-gradient(160deg, #FFFFFF 0%, #FBF5FA 100%)",
         // Same "lighten toward the hover shade" formula as ff-accent-gradient,
         // for every other semantic/status color — status pills, badges, and

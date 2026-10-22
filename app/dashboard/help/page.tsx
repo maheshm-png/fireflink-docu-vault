@@ -446,7 +446,7 @@ export default async function HelpGuidePage() {
         <div className="mx-auto w-full max-w-7xl px-6 py-8 animate-fade-in">
         <div className="space-y-10">
           <section className="max-w-3xl">
-            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">What you can do</h1>
+            <h1 className="mb-1 text-2xl font-bold tracking-tight text-ff-text">My permissions</h1>
             <p className="mb-6 text-sm text-ff-textMuted">
               {ORG_LEVEL.title}: <strong className="text-ff-text">{ROLE_LABELS[user.role]}</strong>
               {myTeams.length > 0 && (

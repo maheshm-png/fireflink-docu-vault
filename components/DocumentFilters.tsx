@@ -135,7 +135,7 @@ export default function DocumentFilters({
   }
 
   const inputClass =
-    "w-full rounded-ff border border-ff-border bg-white px-2.5 py-1.5 text-sm text-ff-text focus:border-ff-accent focus:outline-none";
+    "h-9 w-full rounded-ff border border-ff-border bg-white px-2.5 text-sm text-ff-text focus:border-ff-accent focus:outline-none";
 
   return (
     <div className="min-w-0 flex-1">
@@ -144,10 +144,10 @@ export default function DocumentFilters({
           type="button"
           onClick={() => (open ? setOpen(false) : openPanel())}
           aria-expanded={open}
-          className={`flex items-center gap-1.5 rounded-ff border px-3 py-2 text-sm transition-colors ${
+          className={`flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors ${
             activeCount > 0 || open
               ? "border-ff-accent/50 bg-ff-lavender text-ff-accent"
-              : "border-ff-border bg-white text-ff-text hover:bg-ff-lavender"
+              : "border-ff-border bg-white text-ff-text hover:border-ff-accent/40 hover:bg-ff-lavender/40"
           }`}
         >
           <SlidersHorizontal className="h-4 w-4" aria-hidden />
@@ -157,11 +157,15 @@ export default function DocumentFilters({
           )}
         </button>
 
+        {!compact && QUICK_FILTERS.some(({ key }) => quickOptions(key).length > 0) && (
+          <span aria-hidden className="mx-0.5 hidden h-5 border-l border-ff-border sm:block" />
+        )}
+
         {!compact && QUICK_FILTERS.map(({ key, label }) => {
           const opts = quickOptions(key);
           if (opts.length === 0) return null;
           return (
-            <div key={key} className="w-44">
+            <div key={key}>
               <MultiSelect
                 label={label}
                 options={opts}
@@ -179,7 +183,7 @@ export default function DocumentFilters({
           return (
             <span
               key={s.id}
-              className={`inline-flex max-w-[16rem] items-center rounded-full border text-xs transition-colors ${
+              className={`inline-flex h-9 max-w-[16rem] items-center rounded-full border text-sm transition-colors ${
                 isActive ? "border-transparent bg-ff-accent-gradient text-white shadow-ff" : "border-ff-border bg-white text-ff-text"
               }`}
             >
@@ -187,7 +191,7 @@ export default function DocumentFilters({
                 type="button"
                 onClick={() => navigate(isActive ? [] : s.params)}
                 title={isActive ? "Click to clear this filter" : "Apply this filter"}
-                className="flex min-w-0 items-center gap-1 py-1 pl-2.5 pr-1"
+                className="flex min-w-0 items-center gap-1.5 py-1 pl-3 pr-1"
               >
                 <Bookmark className="h-3 w-3 shrink-0" aria-hidden />
                 <span className="truncate">{s.name}</span>
@@ -208,15 +212,18 @@ export default function DocumentFilters({
           <button
             type="button"
             onClick={() => navigate([])}
-            className="text-xs text-ff-textMuted underline-offset-2 hover:text-ff-text hover:underline"
+            className="flex h-9 items-center gap-1 rounded-full px-2.5 text-sm text-ff-textMuted transition-colors hover:bg-ff-lavender/60 hover:text-ff-text"
           >
-            Clear filters
+            <X className="h-3.5 w-3.5" aria-hidden />
+            Clear all
           </button>
         )}
       </div>
 
       {open && (
-        <div className="mt-3 rounded-ff border border-ff-border bg-white p-4 shadow-ff-md">
+        <div className="mt-3 rounded-ff border border-ff-border bg-white p-5 shadow-ff-md">
+          {/* Text, then the pick lists (only those with something to pick),
+              then the two date ranges side by side, then the checkboxes. */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Keyword">
               <input
@@ -238,34 +245,45 @@ export default function DocumentFilters({
                 />
               </Field>
             )}
-            <Field label="Document type">
-              <MultiSelect
-                options={options.docTypes.map((t) => ({ value: t, label: DOC_TYPE_LABEL[t] ?? t }))}
-                selected={getAll("docType")}
-                onChange={(v) => setAll("docType", v)}
-              />
-            </Field>
-            <Field label="Uploaded by">
-              <MultiSelect
-                options={options.uploaders.map((u) => ({ value: u, label: u }))}
-                selected={getAll("uploader")}
-                onChange={(v) => setAll("uploader", v)}
-              />
-            </Field>
-            <Field label="Owner">
-              <MultiSelect
-                options={options.owners.map((u) => ({ value: u, label: u }))}
-                selected={getAll("owner")}
-                onChange={(v) => setAll("owner", v)}
-              />
-            </Field>
-            <Field label="Tags (any of)">
-              <MultiSelect
-                options={options.tags.map((t) => ({ value: t, label: t }))}
-                selected={getAll("tags")}
-                onChange={(v) => setAll("tags", v)}
-              />
-            </Field>
+            {options.docTypes.length > 0 && (
+              <Field label="Document type">
+                <MultiSelect
+                  options={options.docTypes.map((t) => ({ value: t, label: DOC_TYPE_LABEL[t] ?? t }))}
+                  selected={getAll("docType")}
+                  onChange={(v) => setAll("docType", v)}
+                />
+              </Field>
+            )}
+            {options.uploaders.length > 0 && (
+              <Field label="Uploaded by">
+                <MultiSelect
+                  options={options.uploaders.map((u) => ({ value: u, label: u }))}
+                  selected={getAll("uploader")}
+                  onChange={(v) => setAll("uploader", v)}
+                />
+              </Field>
+            )}
+            {options.owners.length > 0 && (
+              <Field label="Owner">
+                <MultiSelect
+                  options={options.owners.map((u) => ({ value: u, label: u }))}
+                  selected={getAll("owner")}
+                  onChange={(v) => setAll("owner", v)}
+                />
+              </Field>
+            )}
+            {options.tags.length > 0 && (
+              <Field label="Tags (any of)">
+                <MultiSelect
+                  options={options.tags.map((t) => ({ value: t, label: t }))}
+                  selected={getAll("tags")}
+                  onChange={(v) => setAll("tags", v)}
+                />
+              </Field>
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <Field label="Last updated between">
               <DateRange
                 from={getOne("updatedFrom")}
@@ -284,14 +302,14 @@ export default function DocumentFilters({
                 inputClass={inputClass}
               />
             </Field>
-            <Field label="Flags">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1.5">
-                {options.showStale && (
-                  <Check label="Flagged outdated" checked={getOne("stale") === "true"} onChange={(c) => setOne("stale", c ? "true" : "")} />
-                )}
-                <Check label="Possible duplicate" checked={getOne("dup") === "true"} onChange={(c) => setOne("dup", c ? "true" : "")} />
-              </div>
-            </Field>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1">
+            <span className="text-xs font-medium text-ff-textMuted">Show only</span>
+            {options.showStale && (
+              <Check label="Flagged outdated" checked={getOne("stale") === "true"} onChange={(c) => setOne("stale", c ? "true" : "")} />
+            )}
+            <Check label="Possible duplicates" checked={getOne("dup") === "true"} onChange={(c) => setOne("dup", c ? "true" : "")} />
           </div>
 
           {options.customFields.length > 0 && (
@@ -345,18 +363,18 @@ export default function DocumentFilters({
             </>
           )}
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ff-border pt-4">
+          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-ff-border pt-4">
             <button
               type="button"
               onClick={apply}
-              className="rounded-ff bg-ff-accent-gradient px-4 py-1.5 text-sm font-medium text-white shadow-ff hover:opacity-90"
+              className="h-9 rounded-ff bg-ff-accent-gradient px-5 text-sm font-medium text-white shadow-ff hover:opacity-90"
             >
               Apply
             </button>
             <button
               type="button"
               onClick={() => setDraft([])}
-              className="rounded-ff border border-ff-border px-3 py-1.5 text-sm text-ff-text hover:bg-ff-lavender"
+              className="h-9 rounded-ff border border-ff-border px-4 text-sm text-ff-text hover:bg-ff-lavender"
             >
               Reset
             </button>
@@ -367,13 +385,13 @@ export default function DocumentFilters({
               maxLength={60}
               placeholder="Name this filter"
               aria-label="Saved filter name"
-              className="w-48 rounded-ff border border-ff-border px-2.5 py-1.5 text-sm focus:border-ff-accent focus:outline-none"
+              className="h-9 w-48 rounded-ff border border-ff-border px-2.5 text-sm focus:border-ff-accent focus:outline-none"
             />
             <button
               type="button"
               onClick={save}
               disabled={saving || !saveName.trim()}
-              className="flex items-center gap-1.5 rounded-ff border border-ff-accent/50 px-3 py-1.5 text-sm font-medium text-ff-accent hover:bg-ff-lavender disabled:opacity-50"
+              className="flex h-9 items-center gap-1.5 rounded-ff border border-ff-accent/50 px-3 text-sm font-medium text-ff-accent hover:bg-ff-lavender disabled:opacity-50"
             >
               {saving ? <BrandedLoader size={14} /> : <Bookmark className="h-4 w-4" aria-hidden />}
               Save and apply
@@ -430,9 +448,9 @@ function DateRange({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <input type="date" value={from} max={to || undefined} onChange={(e) => onFrom(e.target.value)} aria-label="From" className={inputClass} />
-      <span className="text-xs text-ff-textMuted">to</span>
-      <input type="date" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} aria-label="To" className={inputClass} />
+      <input type="date" value={from} max={to || undefined} onChange={(e) => onFrom(e.target.value)} aria-label="From" className={`min-w-0 flex-1 ${inputClass}`} />
+      <span className="shrink-0 text-xs text-ff-textMuted">to</span>
+      <input type="date" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} aria-label="To" className={`min-w-0 flex-1 ${inputClass}`} />
     </div>
   );
 }
@@ -464,7 +482,8 @@ function MultiSelect({
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
   const picked =
     selected.length === 0 ? "Any" : selected.length <= 2 ? selected.map(labelOf).join(", ") : `${selected.length} selected`;
-  const summary = label ? `${label}: ${picked}` : picked;
+  // Toolbar chips read "Type" until something is picked, then "Type: PDF".
+  const summary = label ? (selected.length === 0 ? label : `${label}: ${picked}`) : picked;
   const visible = query ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase())) : options;
 
   if (options.length === 0) {
@@ -477,11 +496,17 @@ function MultiSelect({
         type="button"
         onClick={() => setOpen((o) => !o)}
         title={summary}
-        className={`flex w-full items-center justify-between gap-2 rounded-ff border bg-white text-left text-sm text-ff-text focus:border-ff-accent focus:outline-none ${
-          label ? "px-3 py-2" : "px-2.5 py-1.5"
-        } ${label && selected.length > 0 ? "border-ff-accent/50" : "border-ff-border"}`}
+        className={
+          label
+            ? `flex h-9 max-w-[16rem] items-center gap-1.5 rounded-full border px-3.5 text-sm transition-colors focus:outline-none ${
+                selected.length > 0
+                  ? "border-ff-accent/50 bg-ff-lavender font-medium text-ff-accent"
+                  : "border-ff-border bg-white text-ff-text hover:border-ff-accent/40 hover:bg-ff-lavender/40"
+              }`
+            : "flex h-9 w-full items-center justify-between gap-2 rounded-ff border border-ff-border bg-white px-2.5 text-left text-sm text-ff-text focus:border-ff-accent focus:outline-none"
+        }
       >
-        <span className={`truncate ${selected.length === 0 ? "text-ff-textMuted" : ""}`}>{summary}</span>
+        <span className={`truncate ${!label && selected.length === 0 ? "text-ff-textMuted" : ""}`}>{summary}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-ff-textMuted" aria-hidden />
       </button>
       {open && (
