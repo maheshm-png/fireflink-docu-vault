@@ -9,11 +9,16 @@ import { prisma } from "./prisma";
 // Needs a reverse proxy (like the `caddy` service) setting X-Forwarded-For
 // in front of the app to have a value at all — direct, unproxied access
 // has no such header, and this correctly stays blank in that case.
-function getClientIp(): string | undefined {
-  const h = headers();
-  const forwardedFor = h.get("x-forwarded-for");
-  if (forwardedFor) return forwardedFor.split(",")[0].trim();
-  return h.get("x-real-ip") ?? undefined;
+// Outside a request (the cron scripts) there are no headers, so no IP.
+async function getClientIp(): Promise<string | undefined> {
+  try {
+    const h = await headers();
+    const forwardedFor = h.get("x-forwarded-for");
+    if (forwardedFor) return forwardedFor.split(",")[0].trim();
+    return h.get("x-real-ip") ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export type AuditAction =
@@ -43,7 +48,7 @@ export async function logAudit(params: {
       action: params.action,
       documentId: params.documentId,
       documentTitle: params.documentTitle,
-      ipAddress: params.ipAddress ?? getClientIp(),
+      ipAddress: params.ipAddress ?? (await getClientIp()),
     },
   });
 }

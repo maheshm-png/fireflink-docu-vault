@@ -12,7 +12,8 @@ import { documentRoleById, eligibleReviewerWhere, passesTeamGate } from "@/lib/a
 // round opens against whoever reviewed the previous round. Archive replaced
 // the separate Revoke action (2026-10-12): archiving takes a document out
 // of circulation, restoring brings it back via review.
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

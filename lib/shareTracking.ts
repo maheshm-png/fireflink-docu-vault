@@ -10,7 +10,7 @@ import { prisma } from "./prisma";
 // share page take seconds to load). Writes are no-ops here, and the id only
 // decides whether to skip counting an open, never what anyone can see.
 async function signedInUserId(): Promise<string | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       get: (name: string) => cookieStore.get(name)?.value,
@@ -41,9 +41,9 @@ const BOT_UA = /bot|crawler|spider|preview|slurp|facebookexternalhit|embedly|wha
 
 export async function recordShareActivity(share: { id: string; createdById: string }, type: "open" | "download") {
   try {
-    const ua = headers().get("user-agent") ?? "";
+    const ua = (await headers()).get("user-agent") ?? "";
     if (!ua || BOT_UA.test(ua)) return;
-    const visitorId = visitorFor(ua);
+    const visitorId = await visitorFor(ua);
     const viewerId = await signedInUserId().catch(() => null);
     // The person who made this link opening it doesn't count. Anything this
     // browser recorded before they signed in was theirs too, so it goes.
@@ -66,9 +66,9 @@ export async function recordShareActivity(share: { id: string; createdById: stri
 // The anonymous browser id middleware.ts gives every share page visitor
 // (header on the first visit, cookie after). Without it (cookies blocked),
 // a hash of network address and browser, so reloads still count once.
-function visitorFor(ua: string): string {
-  const h = headers();
-  const id = h.get("x-share-visitor") ?? cookies().get("ff_sv")?.value;
+async function visitorFor(ua: string): Promise<string> {
+  const h = await headers();
+  const id = h.get("x-share-visitor") ?? (await cookies()).get("ff_sv")?.value;
   if (id) return id;
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "";
   return `h:${createHash("sha256").update(`${ip}|${ua}`).digest("hex").slice(0, 32)}`;

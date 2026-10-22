@@ -21,7 +21,8 @@ import { documentRoleById, isSeesAllOutsider, passesTeamGate } from "@/lib/acces
 // document.status === "published" here used to reject every attempt while
 // a new version was mid-review, even though the page itself still showed
 // the Feedback tab as open.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -168,7 +169,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 // without needing a manager to revoke and republish just to flip that flag.
 // Existing feedback already left is never affected either way; this only
 // gates whether POST above accepts new comments going forward.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

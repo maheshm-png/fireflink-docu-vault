@@ -8,7 +8,8 @@ import { shareLinkUsable } from "@/lib/access";
 // app/api/documents/[id]/pptx-preview/route.ts (same parsed-slide-JSON
 // approach, extractPptxSlides is unchanged/shared), just gated by the
 // share token instead of a logged-in user.
-export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   const share = await prisma.shareLink.findUnique({
     where: { token: params.token },
     include: { document: { include: { currentVersion: true } } },

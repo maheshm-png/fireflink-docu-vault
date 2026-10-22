@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 // which covers the same personal queue (uploads and reviews, by status) plus
 // the documents waiting on you. Old links and bookmarks land on the matching
 // view there.
-export default function ReviewDashboardRedirect({ searchParams }: { searchParams: { status?: string } }) {
+export default async function ReviewDashboardRedirect(props: { searchParams: Promise<{ status?: string }> }) {
+  const searchParams = await props.searchParams;
   const status = ["pending_review", "rejected", "archived"].includes(searchParams.status ?? "")
     ? searchParams.status!
     : "pending_review";

@@ -6,11 +6,12 @@ import { canUploadSomething, uploadableTeamIds } from "@/lib/access";
 import Navbar from "@/components/Navbar";
 import UploadForm from "./UploadForm";
 
-export default async function UploadPage({
-  searchParams,
-}: {
-  searchParams: { category?: string; for?: string; team?: string; folder?: string };
-}) {
+export default async function UploadPage(
+  props: {
+    searchParams: Promise<{ category?: string; for?: string; team?: string; folder?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!canUploadSomething(user)) redirect("/dashboard");

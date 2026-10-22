@@ -10,7 +10,8 @@ import { accessInclude, teamAllows, involvedInReview } from "@/lib/access";
 // as /preview, but returns parsed rows/cells as JSON for .xlsx/.xls/.csv
 // files so the browser can render an actual table instead of a download
 // prompt.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

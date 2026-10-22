@@ -10,7 +10,8 @@ import { accessInclude, teamAllows, involvedInReview } from "@/lib/access";
 // /preview (see that route), but returns a parsed slide structure (text +
 // images, positioned) as JSON instead of redirecting to the raw file, so
 // the browser can render an actual visual approximation of the deck.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

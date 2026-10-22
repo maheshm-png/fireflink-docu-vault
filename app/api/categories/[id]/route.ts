@@ -7,7 +7,8 @@ import { allIndexedCategoryNames, setIndexedCategoryName } from "@/lib/search";
 import { moveCategoryDocuments, resolveMoveTarget } from "@/lib/categoryMove";
 import { logAudit } from "@/lib/audit";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -19,7 +20,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 // PATCH /api/categories/:id — edit name/description/review cycle/upload form.
 // Editing the form schema only affects future uploads — past documents keep
 // whatever metadata they were submitted with.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -90,7 +92,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 // DELETE /api/categories/:id — manager/superadmin only. A category that
 // still has documents needs somewhere to move them first, given in the
 // body as { toCategoryId } or { newCategoryName } (lib/categoryMove.ts).
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {

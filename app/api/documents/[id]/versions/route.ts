@@ -39,7 +39,8 @@ import {
 // reviewers to look like they were reviewing their own document. Pick
 // someone else instead via Reassign on the document page if the usual
 // reviewer(s) shouldn't be the ones this time.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

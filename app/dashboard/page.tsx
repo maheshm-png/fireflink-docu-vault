@@ -39,11 +39,12 @@ const TILE_COLORS = [
   "bg-orange-100 text-orange-600",
 ];
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: RawParams;
-}) {
+export default async function DashboardPage(
+  props: {
+    searchParams: Promise<RawParams>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
@@ -255,7 +256,7 @@ export default async function DashboardPage({
 
   // Pagination: filters run over every match first, then one page is shown.
   const totalRows = rows.length;
-  const perPage = resolvePageSize(param("per"), cookies().get(PAGE_SIZE_COOKIE)?.value);
+  const perPage = resolvePageSize(param("per"), (await cookies()).get(PAGE_SIZE_COOKIE)?.value);
   const page = resolvePage(param("page"), totalRows, perPage);
   rows = rows.slice((page - 1) * perPage, page * perPage);
 

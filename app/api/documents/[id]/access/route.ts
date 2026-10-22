@@ -15,7 +15,8 @@ import { canChangeDownloads, checkAccessChange, passesTeamGate, writeAccessChang
 // approval step uses.
 //   { downloadable: true | false }                 downloads on/off only
 // (canChangeDownloads).
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!(await passesTeamGate(user, params.id))) return NextResponse.json({ error: "Not found" }, { status: 404 });

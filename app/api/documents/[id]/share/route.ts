@@ -58,7 +58,8 @@ async function assertCanManageShare(documentId: string) {
 
 // GET /api/documents/:id/share — the signed-in person's own share link for
 // this document, if they made one.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -99,7 +100,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 // copy of the URL already handed out) keeps working, just with whatever the
 // new settings are. expiresInHours: null means "No expiry" — the link never
 // expires on its own (still removable any time via DELETE below).
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -155,7 +157,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 // DELETE /api/documents/:id/share — stop your own link. ?linkId= stops one
 // specific link instead (My Work > Shared links): your own, or anyone's on
 // this document for its uploader, owner, or a superadmin.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -197,7 +200,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 // means exactly that, not "no NEW sharing," and it's what
 // app/share/[token]/page.tsx's own "may have expired, been turned off"
 // copy already promises.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

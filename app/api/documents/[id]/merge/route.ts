@@ -28,7 +28,8 @@ async function loadSource(id: string) {
   return { user, source };
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const loaded = await loadSource(params.id);
   if ("error" in loaded) return loaded.error;
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 100);
@@ -36,7 +37,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ results: await findMergeTargets(loaded.user, loaded.source.id, q) });
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const loaded = await loadSource(params.id);
   if ("error" in loaded) return loaded.error;
   const { user, source } = loaded;
@@ -84,7 +86,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ ok: true, merged: false, approverName: approver.name });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const pending = await prisma.mergeRequest.findFirst({

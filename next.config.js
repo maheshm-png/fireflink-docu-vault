@@ -14,6 +14,9 @@ const securityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // This folder is the app's root, even when a parent folder has its own
+  // lockfile (Next 15 would otherwise guess the parent).
+  outputFileTracingRoot: __dirname,
   poweredByHeader: false,
   // The only next/image use is the small local logo files (components/Logo.tsx),
   // so the on-the-fly image optimizer isn't needed. Leaving it off also keeps

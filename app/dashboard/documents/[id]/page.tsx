@@ -64,11 +64,12 @@ import { getAppSettings } from "@/lib/settings";
 import { everApprovedVersionIds, computeRoundAttempts } from "@/lib/versionRounds";
 import type { CategoryFormField } from "@/lib/formSchema";
 
-export default async function DocumentDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default async function DocumentDetailPage(
+  props: {
+    params: Promise<{ id: string }>;
+  }
+) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 

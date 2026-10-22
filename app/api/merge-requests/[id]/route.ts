@@ -9,7 +9,8 @@ import { loadForMerge, mergeDocuments, MergeError } from "@/lib/merge";
 // PATCH /api/merge-requests/:id { decision: "approve" | "decline" }: the
 // target document's manager decides a merge request (lib/merge.ts).
 // Approving runs the merge.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

@@ -28,11 +28,12 @@ import type { Role } from "@/lib/rbac";
 // filled by one TeamSelect cell that spans both, so they line up row by row.
 const GRID_COLS = "230px 130px 130px 120px 160px 150px 64px";
 
-export default async function ManageUsersPage({
-  searchParams,
-}: {
-  searchParams: { status?: string };
-}) {
+export default async function ManageUsersPage(
+  props: {
+    searchParams: Promise<{ status?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role !== "superadmin") redirect("/dashboard");

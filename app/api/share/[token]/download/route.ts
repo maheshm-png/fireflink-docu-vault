@@ -21,7 +21,8 @@ function buildDownloadFilename(title: string, label: string, ext: string): strin
 // original file (no watermark — shared-link downloads were deliberately
 // scoped the same as a Contributor/Manager's download, not the "user"
 // role's watermarked one).
-export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   const share = await prisma.shareLink.findUnique({
     where: { token: params.token },
     include: {

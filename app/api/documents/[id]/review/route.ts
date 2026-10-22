@@ -41,7 +41,8 @@ import {
 //     reviewer(s) in a new round — "I want a second/third opinion." The
 //     document needs ALL of them (plus your own row, if still pending) to
 //     approve before it publishes.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

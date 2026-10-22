@@ -11,8 +11,9 @@ import { passesTeamGate } from "@/lib/access";
 // happened, unlike a status change (already shown as "Accepted by X").
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; feedbackId: string; replyId: string } }
+  props: { params: Promise<{ id: string; feedbackId: string; replyId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

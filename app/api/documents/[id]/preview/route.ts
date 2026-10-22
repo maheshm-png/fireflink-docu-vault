@@ -20,7 +20,8 @@ import { accessInclude, teamAllows, involvedInReview, downloadsAllowed } from "@
 // isn't configured for — so pdf.js fetching the presigned URL directly
 // would be silently blocked. Proxying the bytes through our own API sidesteps
 // that entirely: the browser only ever talks to this same-origin route.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

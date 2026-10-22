@@ -13,7 +13,8 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
 // scripts/run-staleness-check.ts. Suggests only — the manager/uploader
 // still has to accept it (it just pre-fills the textarea in
 // EditDocumentForm.tsx, which they can edit or discard).
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

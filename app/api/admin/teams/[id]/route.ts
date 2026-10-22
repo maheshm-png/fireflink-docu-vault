@@ -6,7 +6,8 @@ import { prisma } from "@/lib/prisma";
 // PATCH /api/admin/teams/:id — superadmin renames an option. Every user
 // currently holding it (the FK is by id, not name) picks up the new name
 // automatically, nothing else to update.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -35,7 +36,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 // with it (UserTeam cascades). Refused while the team still guards any
 // restricted document: deleting it would leave those documents visible to
 // nobody but their stakeholders (DocumentTeamAccess.team is Restrict).
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {

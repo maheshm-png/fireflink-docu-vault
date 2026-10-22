@@ -13,8 +13,9 @@ import { documentRoleById, passesTeamGate } from "@/lib/access";
 // tied to a review round, so it's removable any time.
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string; feedbackId: string } }
+  props: { params: Promise<{ id: string; feedbackId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -56,8 +57,9 @@ const FEEDBACK_STATUSES = ["open", "accepted", "closed"];
 //     already) notifies the feedback's own author — see notifyFeedbackAccepted.
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; feedbackId: string } }
+  props: { params: Promise<{ id: string; feedbackId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

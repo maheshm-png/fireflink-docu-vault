@@ -18,7 +18,8 @@ async function guard() {
 
 // GET /api/categories/:id/documents — the documents whose main category
 // this is, for the Categories page's "Move documents" picker.
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const g = await guard();
   if (g.error) return g.error;
   const documents = await prisma.document.findMany({
@@ -31,7 +32,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 // POST /api/categories/:id/documents — moves documents out of this
 // category. body: { documentIds: string[], toCategoryId? , newCategoryName? }
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const g = await guard();
   if (g.error) return g.error;
   const user = g.user!;

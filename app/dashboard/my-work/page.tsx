@@ -63,11 +63,12 @@ const STATUS_LABEL: Record<string, string> = {
   revoked: "Back in review",
 };
 
-export default async function MyWorkPage({
-  searchParams,
-}: {
-  searchParams: RawParams & { tab?: string; view?: string; find?: string; status?: string; scope?: string };
-}) {
+export default async function MyWorkPage(
+  props: {
+    searchParams: Promise<RawParams & { tab?: string; view?: string; find?: string; status?: string; scope?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   // The base "user" role neither uploads nor reviews (lib/rbac.ts), same as

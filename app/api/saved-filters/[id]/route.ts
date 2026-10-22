@@ -3,7 +3,8 @@ import { getCurrentUser } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 
 // DELETE /api/saved-filters/:id: remove one of the caller's own saved filters.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

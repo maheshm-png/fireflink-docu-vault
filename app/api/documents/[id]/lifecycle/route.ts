@@ -26,7 +26,8 @@ import { documentRoleById, passesTeamGate } from "@/lib/access";
 //     still mid-review already has an explicit versionId picker on the
 //     approve action itself (see .../review/route.ts), and a revoked one has
 //     a fresh ReviewRequest open that this would sidestep confusingly.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

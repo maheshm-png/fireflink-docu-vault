@@ -8,7 +8,8 @@ import { downloadsAllowed, shareLinkUsable } from "@/lib/access";
 // separate from app/api/documents/[id]/download/route.ts's inline branch
 // rather than reusing it — that route requires a logged-in user, this one
 // must not.
-export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   const format = req.nextUrl.searchParams.get("format");
 
   const share = await prisma.shareLink.findUnique({

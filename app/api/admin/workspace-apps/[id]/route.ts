@@ -8,7 +8,8 @@ import { prisma } from "@/lib/prisma";
 // clearing `href` back to null (moving it back to "Coming Soon"). Every
 // field is optional here (unlike POST's create) so a caller can update just
 // sortOrder for a reorder without resending the whole row.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -67,7 +68,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 // DELETE /api/admin/workspace-apps/:id — superadmin removes a tile from the
 // launcher entirely.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {

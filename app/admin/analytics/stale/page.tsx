@@ -16,11 +16,12 @@ import ViewToggle from "@/components/ViewToggle";
 // hardcoded false at every indexing call site and never actually flipped
 // true anywhere, so filtering the search index on it would silently return
 // nothing — the staleness data only really lives in the StalenessFlag table.
-export default async function StaleDocumentsPage({
-  searchParams,
-}: {
-  searchParams: { view?: string };
-}) {
+export default async function StaleDocumentsPage(
+  props: {
+    searchParams: Promise<{ view?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!can(user.role, "viewAuditLog")) redirect("/dashboard");

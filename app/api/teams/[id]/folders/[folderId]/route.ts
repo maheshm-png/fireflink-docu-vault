@@ -20,7 +20,11 @@ async function gate(teamId: string, folderId: string) {
   return { user, folder };
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string; folderId: string } }) {
+export async function PATCH(
+  req: NextRequest,
+  props: { params: Promise<{ id: string; folderId: string }> }
+) {
+  const params = await props.params;
   const g = await gate(params.id, params.folderId);
   if ("error" in g) return g.error;
   const body = await req.json().catch(() => ({}));
@@ -35,7 +39,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string; folderId: string } }) {
+export async function DELETE(
+  _req: NextRequest,
+  props: { params: Promise<{ id: string; folderId: string }> }
+) {
+  const params = await props.params;
   const g = await gate(params.id, params.folderId);
   if ("error" in g) return g.error;
   // onDelete: SetNull takes every document in it out of the folder.

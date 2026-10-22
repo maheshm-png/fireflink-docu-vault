@@ -13,7 +13,8 @@ const RECOVERY_WINDOW_DAYS = 30;
 // scripts/run-retention-cleanup.ts has already purged it for good).
 // Manager or superadmin — see the rbac.ts comment on viewDeleted/restoreDocument
 // for why superadmin is included here even though it can't delete.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

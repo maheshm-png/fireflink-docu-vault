@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   const {
     data: { user },
-  } = await supabaseServer().auth.getUser();
+  } = await (await supabaseServer()).auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "This link has expired. Ask an admin to send a new invite." }, { status: 401 });
   }

@@ -10,7 +10,8 @@ import { passesTeamGate } from "@/lib/access";
 // review at all. Not sent anywhere yet (no GChat/email here) — that only
 // happens in a batch when the review decision is submitted, see
 // notifyReviewDecision's inlineComments param.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

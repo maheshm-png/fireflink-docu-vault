@@ -11,7 +11,8 @@ import { shareLinkUsable } from "@/lib/access";
 // rather than reusing /view or the page itself: this only ever needs to
 // return the few fields that can change out from under an open tab, not
 // the file or the page's full markup.
-export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   const share = await prisma.shareLink.findUnique({
     where: { token: params.token },
     select: {

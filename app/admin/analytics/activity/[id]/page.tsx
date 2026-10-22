@@ -12,13 +12,14 @@ import { LocalDateTime } from "@/components/LocalDateTime";
 // Downloaded tables — clicking the count (not the title, which just opens
 // the document itself) shows who actually viewed or downloaded it, not
 // just how many times.
-export default async function DocumentActivityPage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams: { type?: string };
-}) {
+export default async function DocumentActivityPage(
+  props: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ type?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!can(user.role, "viewAuditLog")) redirect("/dashboard");

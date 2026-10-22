@@ -10,8 +10,9 @@ import { passesTeamGate } from "@/lib/access";
 // a decision's been submitted, that round's comments are historical record.
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string; commentId: string } }
+  props: { params: Promise<{ id: string; commentId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -42,8 +43,9 @@ export async function DELETE(
 // round is still pending.
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; commentId: string } }
+  props: { params: Promise<{ id: string; commentId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

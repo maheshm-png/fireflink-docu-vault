@@ -8,8 +8,8 @@ import { prisma } from "./prisma";
  * Server-side Supabase client bound to the current request's cookies.
  * Use in Server Components / Route Handlers only.
  */
-export function supabaseServer() {
-  const cookieStore = cookies();
+export async function supabaseServer() {
+  const cookieStore = await cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -82,7 +82,7 @@ const AUTH_CACHE_TTL_MS = 10_000;
  * the user, say) share one lookup per request, same as before.
  */
 export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
-  const supabase = supabaseServer();
+  const supabase = await supabaseServer();
   const {
     data: { session },
   } = await supabase.auth.getSession();

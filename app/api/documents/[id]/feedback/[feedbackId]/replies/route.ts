@@ -14,8 +14,9 @@ import { documentRoleById, passesTeamGate } from "@/lib/access";
 // no status field involved at all.
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string; feedbackId: string } }
+  props: { params: Promise<{ id: string; feedbackId: string }> }
 ) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

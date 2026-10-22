@@ -11,7 +11,8 @@ import { isWithdrawalBeforeReview, purgeDocument } from "@/lib/purgeDocument";
 import { validateMetadataAgainstSchema, type CategoryFormField } from "@/lib/formSchema";
 import { DUPLICATE_REASON } from "@/lib/duplicates";
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -102,7 +103,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 // watermarking rules in app/api/documents/[id]/download/route.ts,
 // LibreOffice conversion assumptions), so there's no door to change it
 // after the fact.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
@@ -271,7 +273,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 // it out from under that approval — see app/dashboard/documents/[id]/
 // page.tsx's matching canDelete for the same rule, enforced here since the
 // UI hiding the button isn't enough on its own against a direct API call.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams

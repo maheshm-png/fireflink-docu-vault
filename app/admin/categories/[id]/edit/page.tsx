@@ -8,7 +8,8 @@ import CategoryFormBuilder from "../../CategoryFormBuilder";
 import { prisma } from "@/lib/prisma";
 import type { CategoryFormField } from "@/lib/formSchema";
 
-export default async function EditCategoryPage({ params }: { params: { id: string } }) {
+export default async function EditCategoryPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!can(user.role, "manageCategories")) redirect("/dashboard");

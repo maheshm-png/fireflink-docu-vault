@@ -15,7 +15,8 @@ import PlumWatermark from "@/components/PlumWatermark";
 // share/route.ts manages it). Deliberately outside /dashboard so
 // middleware.ts's auth gate (which only matches /dashboard and /admin)
 // never touches this route — no middleware change needed for that.
-export default async function SharePage({ params }: { params: { token: string } }) {
+export default async function SharePage(props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   const share = await prisma.shareLink.findUnique({
     where: { token: params.token },
     include: {

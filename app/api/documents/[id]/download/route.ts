@@ -56,7 +56,8 @@ function buildDownloadFilename(title: string, label: string, ext: string): strin
 // of the original, when one exists (hasPreviewPdf). The PDF is never
 // watermarked (it isn't the editable original the "user"-role restriction
 // cares about) and isn't restricted to any particular role.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

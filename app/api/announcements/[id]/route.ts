@@ -7,7 +7,8 @@ import { prisma } from "@/lib/prisma";
 // PATCH /api/announcements/:id — body: { message?: string, isActive?: boolean }
 // Edit the text and/or hold (isActive: false) / resume (isActive: true) a
 // message. Either field can be sent alone or together.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -58,7 +59,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 // DELETE /api/announcements/:id — permanent removal, unlike "hold" (isActive:
 // false via PATCH), which just pauses it without losing the message.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {

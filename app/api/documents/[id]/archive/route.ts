@@ -11,7 +11,8 @@ import { documentRoleById, passesTeamGate, usersWhoCanSeeWhere } from "@/lib/acc
 // (published, rejected, or back in review) out of circulation without
 // deleting it. The one "take it down" action: it replaced Revoke
 // (2026-10-12). Restoring it (unarchive) sends it back through review.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Team access control: a restricted document outside this user's teams
